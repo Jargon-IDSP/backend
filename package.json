@@ -1,13 +1,10 @@
 {
   "name": "backend",
   "version": "1.0.0",
+  "module": "index.ts",
   "type": "module",
-  "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
-    "build": "tsc",
-    "start": "node dist/main.js",
-    "type-check": "tsc --noEmit"
+    "dev": "bun --hot src/index.ts"
   },
   "repository": {
     "type": "git",
@@ -22,12 +19,13 @@
   "homepage": "https://github.com/Jargon-IDSP/backend#readme",
   "description": "",
   "dependencies": {
-    "@hono/node-server": "^1.19.2",
     "hono": "^4.9.6"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^24.3.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
-  }
+  },
+  "private": true
 }
