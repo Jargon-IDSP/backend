@@ -19,7 +19,10 @@
   "homepage": "https://github.com/Jargon-IDSP/backend#readme",
   "description": "",
   "dependencies": {
-    "hono": "^4.9.6"
+    "@prisma/client": "^6.16.2",
+    "hono": "^4.9.6",
+    "mysql": "^2.18.1",
+    "prisma": "^6.16.2"
   },
   "devDependencies": {
     "@types/bun": "latest",
