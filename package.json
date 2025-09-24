@@ -4,7 +4,8 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "start": "tsx --watch src/index.ts"
+    "start": "tsx --watch src/index.ts",
+    "seed": "ts-node src/seeds/flashcardSeeder.ts"
   },
   "repository": {
     "type": "git",
@@ -19,7 +20,10 @@
   "homepage": "https://github.com/Jargon-IDSP/backend#readme",
   "description": "",
   "dependencies": {
-    "hono": "^4.9.6"
+    "@prisma/client": "^6.16.2",
+    "hono": "^4.9.6",
+    "mysql": "^2.18.1",
+    "prisma": "^6.16.2"
   },
   "devDependencies": {
     "@hono/node-server": "^1.19.4",
