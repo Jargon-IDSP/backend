@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "tsx --watch src/index.ts",
-    "seed": "ts-node src/seeds/flashcardSeeder.ts"
+    "seed": "tsx src/seeds/flashcardSeeder.ts",
+    "seed-questions": "tsx src/seeds/questionSeeder.ts",
+    "seed-all": "npm run seed && npm run seed-questions"
   },
   "repository": {
     "type": "git",
