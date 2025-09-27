@@ -1,9 +1,9 @@
-import { PrismaClient } from '@prisma/client'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { flashcardJson } from '../interfaces/flashcardData'
 
-
+const prismaModule = await import('@prisma/client') as any
+const { PrismaClient } = prismaModule
 const prisma = new PrismaClient()
 
 function loadFlashcardsFromFile(filePath: string): flashcardJson[] {
@@ -59,6 +59,8 @@ async function importData() {
     const dbData = flashcardsData.map(transformForDB)
     
     console.log('🧹 Clearing existing data...')
+    // Delete questions first due to foreign key
+    await prisma.question.deleteMany()
     await prisma.flashcard.deleteMany()
     
     console.log('📥 Importing flashcards...')

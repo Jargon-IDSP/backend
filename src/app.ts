@@ -7,6 +7,7 @@ import { chatRoute } from "./routes/chatRoute";
 import { helpRoute } from "./routes/helpRoute";
 import { profileRoute } from "./routes/profileRoute";
 import { flashcardRoute } from "./routes/flashcardRoute";
+import { questionRoute } from "./routes/questionRoute";
 
 export const app = new Hono();
 
@@ -18,3 +19,4 @@ app.route("/chat", chatRoute);
 app.route("/help", helpRoute);
 app.route("/profile", profileRoute);
 app.route("/flashcards", flashcardRoute);
+app.route("/questions", questionRoute);

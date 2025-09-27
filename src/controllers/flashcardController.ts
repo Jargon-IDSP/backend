@@ -1,5 +1,7 @@
 import type { Context } from "hono";
-import { PrismaClient } from "@prisma/client";
+// import { PrismaClient } from "@prisma/client";
+const prismaModule = await import('@prisma/client') as any
+const { PrismaClient } = prismaModule
 
 const prisma = new PrismaClient();
 
