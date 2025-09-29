@@ -13,6 +13,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Industry {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  
+  flashcards Flashcard[]
+  
+  @@map("industries")
+}
+
+model Level {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  
+  flashcards Flashcard[]
+  
+  @@map("levels")
+}
+
 model Flashcard {
   id String @id
   
@@ -32,9 +50,12 @@ model Flashcard {
   definitionPunjabi  String @db.Text
   definitionKorean   String @db.Text
 
-  industry_id Number @db.Int @relation("industry_id")
-  level_id: Number @db.Int @relation("level_id")
+   industryId Int
+  levelId    Int
 
+  industry Industry @relation(fields: [industryId], references: [id])
+  level    Level    @relation(fields: [levelId], references: [id])
+  
   questions Question[] @relation("QuestionCorrectAnswer")
 
   @@map("flashcards")

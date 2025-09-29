@@ -1,3 +1,5 @@
+import type { Flashcard, Industry, Level } from '@prisma/client'
+
 export interface flashcardJson {
   id: string
   term: {
@@ -22,6 +24,17 @@ export interface flashcardJson {
   level_id: number
 }
 
+export interface LevelData {
+  id: number
+  level_number: number
+  name: string
+}
+
+export interface IndustryData {
+  id: number
+  name: string
+}
+
 export interface FlashcardDisplay {
   id: string
   term: {
@@ -36,4 +49,11 @@ export interface FlashcardDisplay {
   level_id: number
 }
 
+
+
 export type Language = 'french' | 'mandarin' | 'spanish' | 'tagalog' | 'punjabi' | 'korean'
+
+export type FlashcardWithRelations = Flashcard & {
+  industry: Industry
+  level: Level
+}
