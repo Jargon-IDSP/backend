@@ -130,3 +130,5 @@ export const getRandomFlashcard = async (c: Context) => {
     }, 500);
   }
 };
+
+// Need to add get term by level, and get term by role

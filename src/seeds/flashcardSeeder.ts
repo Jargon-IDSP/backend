@@ -3,6 +3,7 @@ import * as path from 'path'
 import type { flashcardJson } from '../interfaces/flashcardData'
 
 const jsonFilePath = 'words.json' 
+// Need to update file name according to the doc to import
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
