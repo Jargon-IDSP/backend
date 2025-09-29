@@ -3,7 +3,7 @@ import * as path from 'path'
 import type { flashcardJson, LevelData, IndustryData } from '../interfaces/flashcardData'
 
 
-const dataDirectory = '../terms-data'
+const dataDirectory = '../terms-jsons'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
