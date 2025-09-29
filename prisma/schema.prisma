@@ -32,9 +32,6 @@ model Flashcard {
   definitionPunjabi  String @db.Text
   definitionKorean   String @db.Text
 
-  industry_id Number @db.Int @relation("industry_id")
-  level_id: Number @db.Int @relation("level_id")
-
   questions Question[] @relation("QuestionCorrectAnswer")
 
   @@map("flashcards")
