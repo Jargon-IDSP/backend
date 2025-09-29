@@ -18,6 +18,8 @@ export interface flashcardJson {
     punjabi: string
     korean: string
   }
+  industry_id: number
+  level_id: number
 }
 
 export interface FlashcardDisplay {
@@ -30,6 +32,8 @@ export interface FlashcardDisplay {
     english: string
     [key: string]: string
   }
+  industry_id: number
+  level_id: number
 }
 
 export type Language = 'french' | 'mandarin' | 'spanish' | 'tagalog' | 'punjabi' | 'korean'

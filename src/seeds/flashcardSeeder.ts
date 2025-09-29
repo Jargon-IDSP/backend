@@ -2,6 +2,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { flashcardJson } from '../interfaces/flashcardData'
 
+const jsonFilePath = 'words.json' 
+
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
 const prisma = new PrismaClient()
@@ -42,7 +44,9 @@ function transformForDB(jsonCard: flashcardJson) {
     definitionSpanish: jsonCard.definition.spanish,
     definitionTagalog: jsonCard.definition.tagalog,
     definitionPunjabi: jsonCard.definition.punjabi,
-    definitionKorean: jsonCard.definition.korean
+    definitionKorean: jsonCard.definition.korean,
+    industry_id: jsonCard.industry_id,
+    level_id: jsonCard.level_id
   }
 }
 
@@ -50,7 +54,6 @@ async function importData() {
   try {
     console.log('🚀 Starting data import...')
     
-    const jsonFilePath = 'words.json' 
     console.log(`📖 Loading data from ${jsonFilePath}...`)
     const flashcardsData = loadFlashcardsFromFile(jsonFilePath)
     
