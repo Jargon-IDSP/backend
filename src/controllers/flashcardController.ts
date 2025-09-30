@@ -7,6 +7,20 @@ import type { FlashcardWithRelations} from '../interfaces/flashcardData'
 
 const prisma = new PrismaClient();
 
+let flashcardCache: { id: string, industryId: number | null, levelId: number }[] = [];
+
+export const initializeCache = async () => {
+  console.log('Loading flashcard cache...');
+  flashcardCache = await prisma.flashcard.findMany({
+    select: {
+      id: true,
+      industryId: true,
+      levelId: true
+    }
+  });
+  console.log(`Cached ${flashcardCache.length} flashcards`);
+};
+
 const convertToDisplayFormat = (dbFlashcard: any, language?: string) => {
   const result: any = {
     id: dbFlashcard.id,
@@ -234,17 +248,16 @@ export const getRandomFlashcard = async (c: Context) => {
     
     const randomOffset = Math.floor(Math.random() * totalCount);
     
-    const randomFlashcard = await prisma.flashcard.findMany({
+    const randomFlashcard = await prisma.flashcard.findFirst({ 
       where: whereClause,
       skip: randomOffset,
-      take: 1,
       include: {
         industry: true,
         level: true
       }
     });
     
-    if (!randomFlashcard || randomFlashcard.length === 0) {
+    if (!randomFlashcard) {
       return c.json({
         success: false,
         error: 'No flashcard found'
@@ -255,9 +268,9 @@ export const getRandomFlashcard = async (c: Context) => {
     const selectedLanguage = language || languages[Math.floor(Math.random() * languages.length)];
     
     const displayCard = {
-      ...convertToDisplayFormat(randomFlashcard[0], selectedLanguage),
-      industry: randomFlashcard[0].industry.name,
-      level: randomFlashcard[0].level.name
+      ...convertToDisplayFormat(randomFlashcard, selectedLanguage),
+      industry: randomFlashcard.industry?.name || null,
+      level: randomFlashcard.level.name
     };
     
     return c.json({

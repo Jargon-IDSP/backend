@@ -57,7 +57,10 @@ model Flashcard {
   level    Level    @relation(fields: [levelId], references: [id])
   
   questions Question[] @relation("QuestionCorrectAnswer")
-
+  
+  @@index([industryId])
+  @@index([levelId])
+  @@index([termEnglish(length: 255)])
   @@map("flashcards")
 }
 
