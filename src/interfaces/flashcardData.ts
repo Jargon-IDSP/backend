@@ -20,7 +20,7 @@ export interface flashcardJson {
     punjabi: string
     korean: string
   }
-  industry_id: number
+  industry_id?: number
   level_id: number
 }
 

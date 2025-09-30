@@ -50,10 +50,10 @@ model Flashcard {
   definitionPunjabi  String @db.Text
   definitionKorean   String @db.Text
 
-   industryId Int
+  industryId Int?
   levelId    Int
 
-  industry Industry @relation(fields: [industryId], references: [id])
+  industry Industry? @relation(fields: [industryId], references: [id])
   level    Level    @relation(fields: [levelId], references: [id])
   
   questions Question[] @relation("QuestionCorrectAnswer")
