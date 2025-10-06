@@ -1,6 +1,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
+const dataDirectory = './terms-jsons'
+
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
 const prisma = new PrismaClient()
@@ -24,10 +26,9 @@ interface QuestionJson {
 function loadQuestionsFromFile(filePath: string): QuestionJson[] {
   try {
     const absolutePath = path.resolve(filePath)
-    console.log(`📁 Looking for questions file at: ${absolutePath}`)
     
     if (!fs.existsSync(absolutePath)) {
-      console.error(`❌ File not found: ${absolutePath}`)
+      console.error(`File not found: ${absolutePath}`)
       process.exit(1)
     }
     
@@ -35,8 +36,7 @@ function loadQuestionsFromFile(filePath: string): QuestionJson[] {
     const data = JSON.parse(fileContent)
     return Array.isArray(data) ? data : [data]
   } catch (error) {
-    console.error('❌ Error loading questions JSON file:', error)
-    console.error('Make sure the file exists and contains valid JSON')
+    console.error('Error loading questions file:', error)
     process.exit(1)
   }
 }
@@ -53,38 +53,33 @@ function transformQuestionForDB(jsonQuestion: QuestionJson) {
     promptPunjabi: jsonQuestion.prompt.punjabi,
     promptKorean: jsonQuestion.prompt.korean,
     difficulty: jsonQuestion.difficulty,
-    tags: JSON.stringify(jsonQuestion.tags) // Store tags as JSON string
+    tags: JSON.stringify(jsonQuestion.tags)
   }
 }
 
 async function importQuestions() {
   try {
-    console.log('🚀 Starting questions import...')
+    console.log('Starting questions import...\n')
     
-    const jsonFilePath = 'questions.json' 
-    console.log(`📖 Loading questions from ${jsonFilePath}...`)
-    const questionsData = loadQuestionsFromFile(jsonFilePath)
+    const questionsFilePath = path.join(dataDirectory, 'questions.json')
+    const questionsData = loadQuestionsFromFile(questionsFilePath)
     
-    console.log(`📚 Found ${questionsData.length} questions to import`)
+    console.log(`Loaded ${questionsData.length} questions\n`)
     
     const dbData = questionsData.map(transformQuestionForDB)
     
-    console.log('🧹 Clearing existing questions...')
-    // Questions can be deleted independently
+    console.log('Clearing existing questions...')
     await prisma.question.deleteMany()
     
-    console.log('📥 Importing questions...')
-    const result = await prisma.question.createMany({
-      data: dbData
-    })
+    console.log('Importing questions...')
+    const result = await prisma.question.createMany({ data: dbData })
     
-    console.log(`✅ Successfully imported ${result.count} questions`)
-    
-    const total = await prisma.question.count()
-    console.log(`📊 Total questions in database: ${total}`)
+    console.log(`\nImport completed successfully!`)
+    console.log(`  Questions: ${result.count}`)
     
   } catch (error) {
-    console.error('❌ Questions import failed:', error)
+    console.error('\nQuestions import failed:', error)
+    process.exit(1)
   } finally {
     await prisma.$disconnect()
   }

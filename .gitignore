@@ -35,3 +35,5 @@ dotenv
 .DS_Store
 
 /src/generated/prisma
+
+terms-jsons
