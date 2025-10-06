@@ -246,17 +246,12 @@ export const getFlashcards = async (c: Context) => {
     const language = c.req.query("language");
     const industryId = c.req.query("industry_id");
     const levelId = c.req.query("level_id");
-    const page = parseInt(c.req.query("page") || "1");
-    const limit = parseInt(c.req.query("limit") || "20");
-    const skip = (page - 1) * limit;
 
     // Check cache
     const cacheKey = generateCacheKey("flashcards", {
       language,
       industryId,
       levelId,
-      page,
-      limit,
     });
     const cached = responseCache.get(cacheKey);
     if (cached) {
@@ -268,23 +263,18 @@ export const getFlashcards = async (c: Context) => {
     if (industryId) whereClause.industryId = parseInt(industryId);
     if (levelId) whereClause.levelId = parseInt(levelId);
 
-    const [flashcards, totalCount] = await Promise.all([
-      prisma.flashcard.findMany({
-        where: whereClause,
-        skip,
-        take: limit,
-        include: {
-          industry: true,
-          level: true,
-        },
-      }),
-      prisma.flashcard.count({ where: whereClause }),
-    ]);
+    const flashcards = await prisma.flashcard.findMany({
+      where: whereClause,
+      include: {
+        industry: true,
+        level: true,
+      },
+    });
 
     const displayFlashcards = flashcards.map(
       (card: FlashcardWithRelations) => ({
         ...convertToDisplayFormat(card, language),
-        industry: card.industry.name,
+        industry: card.industry ? card.industry.name : null,
         level: card.level.name,
       })
     );
@@ -292,9 +282,6 @@ export const getFlashcards = async (c: Context) => {
     const response = {
       success: true,
       count: flashcards.length,
-      total: totalCount,
-      page,
-      totalPages: Math.ceil(totalCount / limit),
       data: displayFlashcards,
       filters: { language, industry_id: industryId, level_id: levelId },
     };
