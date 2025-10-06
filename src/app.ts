@@ -10,11 +10,21 @@ import { flashcardRoute } from "./routes/flashcardRoute";
 import { questionRoute } from "./routes/questionRoute";
 import { initializeCache } from "./controllers/flashcardController";
 
-
 export const app = new Hono();
 
 app.use("*", logger());
-app.use("/*", cors());
+app.use(
+  "/*",
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:8080",
+      "https://frontend-cl3c.onrender.com/",
+      "https://backend-84zo.onrender.com/",
+    ],
+    credentials: true,
+  })
+);
 
 app.route("/", homeRoute);
 app.route("/chat", chatRoute);
