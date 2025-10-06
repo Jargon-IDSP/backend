@@ -22,7 +22,9 @@
   "homepage": "https://github.com/Jargon-IDSP/backend#readme",
   "description": "",
   "dependencies": {
+    "@clerk/backend": "^2.17.1",
     "@prisma/client": "^6.16.2",
+    "dotenv": "^17.2.3",
     "hono": "^4.9.6",
     "mysql": "^2.18.1",
     "prisma": "^6.16.2"
