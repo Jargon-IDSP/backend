@@ -13,7 +13,7 @@ interface QuestionJson {
   prompt: {
     english: string
     french: string
-    mandarin: string
+    chinese: string
     spanish: string
     tagalog: string
     punjabi: string
@@ -47,7 +47,7 @@ function transformQuestionForDB(jsonQuestion: QuestionJson) {
     correctTermId: jsonQuestion.correctTermId,
     promptEnglish: jsonQuestion.prompt.english,
     promptFrench: jsonQuestion.prompt.french,
-    promptMandarin: jsonQuestion.prompt.mandarin,
+    promptChinese: jsonQuestion.prompt.chinese,
     promptSpanish: jsonQuestion.prompt.spanish,
     promptTagalog: jsonQuestion.prompt.tagalog,
     promptPunjabi: jsonQuestion.prompt.punjabi,

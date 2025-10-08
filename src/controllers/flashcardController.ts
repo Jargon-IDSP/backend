@@ -70,7 +70,7 @@ const convertToDisplayFormat = (dbFlashcard: any, language?: string) => {
 const getTermByLanguage = (dbFlashcard: any, language: string) => {
   const languageMap: { [key: string]: string } = {
     french: dbFlashcard.termFrench,
-    mandarin: dbFlashcard.termMandarin,
+    chinese: dbFlashcard.termChinese,
     spanish: dbFlashcard.termSpanish,
     tagalog: dbFlashcard.termTagalog,
     punjabi: dbFlashcard.termPunjabi,
@@ -82,7 +82,7 @@ const getTermByLanguage = (dbFlashcard: any, language: string) => {
 const getDefinitionByLanguage = (dbFlashcard: any, language: string) => {
   const languageMap: { [key: string]: string } = {
     french: dbFlashcard.definitionFrench,
-    mandarin: dbFlashcard.definitionMandarin,
+    chinese: dbFlashcard.definitionChinese,
     spanish: dbFlashcard.definitionSpanish,
     tagalog: dbFlashcard.definitionTagalog,
     punjabi: dbFlashcard.definitionPunjabi,
@@ -388,7 +388,7 @@ export const getRandomFlashcard = async (c: Context) => {
 
     const languages = [
       "french",
-      "mandarin",
+      "chinese",
       "spanish",
       "tagalog",
       "punjabi",

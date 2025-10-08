@@ -36,7 +36,7 @@ model Flashcard {
   
   termEnglish  String @db.Text
   termFrench   String @db.Text
-  termMandarin String @db.Text
+  termChinese String @db.Text
   termSpanish  String @db.Text
   termTagalog  String @db.Text
   termPunjabi  String @db.Text
@@ -44,7 +44,7 @@ model Flashcard {
   
   definitionEnglish  String @db.Text
   definitionFrench   String @db.Text
-  definitionMandarin String @db.Text
+  definitionChinese String @db.Text
   definitionSpanish  String @db.Text
   definitionTagalog  String @db.Text
   definitionPunjabi  String @db.Text
@@ -71,7 +71,7 @@ model Question {
   
   promptEnglish  String @db.Text
   promptFrench   String @db.Text
-  promptMandarin String @db.Text
+  promptChinese String @db.Text
   promptSpanish  String @db.Text
   promptTagalog  String @db.Text
   promptPunjabi  String @db.Text

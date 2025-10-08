@@ -68,14 +68,14 @@ function transformForDB(jsonCard: flashcardJson) {
     id: jsonCard.id,
     termEnglish: jsonCard.term.english,
     termFrench: jsonCard.term.french,
-    termMandarin: jsonCard.term.mandarin,
+    termChinese: jsonCard.term.chinese,
     termSpanish: jsonCard.term.spanish,
     termTagalog: jsonCard.term.tagalog,
     termPunjabi: jsonCard.term.punjabi,
     termKorean: jsonCard.term.korean,
     definitionEnglish: jsonCard.definition.english,
     definitionFrench: jsonCard.definition.french,
-    definitionMandarin: jsonCard.definition.mandarin,
+    definitionChinese: jsonCard.definition.chinese,
     definitionSpanish: jsonCard.definition.spanish,
     definitionTagalog: jsonCard.definition.tagalog,
     definitionPunjabi: jsonCard.definition.punjabi,
@@ -136,6 +136,7 @@ if (invalidLevel.length > 0) {
 }
 
     console.log('Clearing existing data...')
+    await prisma.question.deleteMany()
     await prisma.flashcard.deleteMany()
     await prisma.industry.deleteMany()
     await prisma.level.deleteMany()
