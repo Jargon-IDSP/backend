@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
-const dataDirectory = './terms-jsons'
+const dataDirectory = '../jargon-terms'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
@@ -41,6 +41,43 @@ function loadQuestionsFromFile(filePath: string): QuestionJson[] {
   }
 }
 
+function loadAllQuestionsFromDirectory(baseDir: string): QuestionJson[] {
+  const allQuestions: QuestionJson[] = []
+  
+  try {
+    const absoluteBaseDir = path.resolve(baseDir)
+    
+    if (!fs.existsSync(absoluteBaseDir)) {
+      console.error(`Directory not found: ${absoluteBaseDir}`)
+      process.exit(1)
+    }
+    
+    const entries = fs.readdirSync(absoluteBaseDir, { withFileTypes: true })
+    const industryFolders = entries.filter(entry => 
+      entry.isDirectory() && entry.name !== '.git' 
+    )
+    
+    for (const folder of industryFolders) {
+      const folderPath = path.join(absoluteBaseDir, folder.name)
+      const files = fs.readdirSync(folderPath)
+        .filter(file => file.endsWith('-questions.json'))
+        .sort()
+      
+      for (const file of files) {
+        const filePath = path.join(folderPath, file)
+        const fileData = loadQuestionsFromFile(filePath)
+        allQuestions.push(...fileData)
+      }
+    }
+    
+    return allQuestions
+    
+  } catch (error) {
+    console.error('Error loading questions:', error)
+    process.exit(1)
+  }
+}
+
 function transformQuestionForDB(jsonQuestion: QuestionJson) {
   return {
     id: jsonQuestion.id,
@@ -61,8 +98,7 @@ async function importQuestions() {
   try {
     console.log('Starting questions import...\n')
     
-    const questionsFilePath = path.join(dataDirectory, 'questions.json')
-    const questionsData = loadQuestionsFromFile(questionsFilePath)
+    const questionsData = loadAllQuestionsFromDirectory(dataDirectory)
     
     console.log(`Loaded ${questionsData.length} questions\n`)
     
