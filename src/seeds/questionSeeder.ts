@@ -60,7 +60,7 @@ function loadAllQuestionsFromDirectory(baseDir: string): QuestionJson[] {
     for (const folder of industryFolders) {
       const folderPath = path.join(absoluteBaseDir, folder.name)
       const files = fs.readdirSync(folderPath)
-        .filter(file => file.endsWith('-questions.json'))
+        .filter(file => file.includes('-questions') && file.endsWith('.json'))
         .sort()
       
       for (const file of files) {
