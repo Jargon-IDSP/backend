@@ -9,9 +9,12 @@ export const getUploadUrl = async (c: Context) => {
   try {
     const { filename, type } = await c.req.json();
     
-    const userId = "test-user"; 
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
     
-    const key = `documents/${userId}/${Date.now()}-${filename}`;
+    const key = `documents/${user.id}/${Date.now()}-${filename}`;
     
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET!,
@@ -32,18 +35,19 @@ export const saveDocument = async (c: Context) => {
   try {
     const { fileKey, filename, fileType, fileSize } = await c.req.json();
     
-    const userId = "test-user"; 
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
     
-    // Don't store a URL - just store the key
-    // We'll generate signed URLs on-demand
     const document = await prisma.document.create({
       data: {
         filename,
         fileKey,
-        fileUrl: fileKey,  // Store the key, not a full URL
+        fileUrl: fileKey,
         fileType,
         fileSize: fileSize || null,
-        userId,
+        userId: user.id,
       },
     });
     
@@ -56,10 +60,13 @@ export const saveDocument = async (c: Context) => {
 
 export const getUserDocuments = async (c: Context) => {
   try {
-    const userId = "test-user";
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
     
     const documents = await prisma.document.findMany({
-      where: { userId },
+      where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
     
@@ -74,12 +81,21 @@ export const getDocument = async (c: Context) => {
   try {
     const id = c.req.param('id');
     
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    
     const document = await prisma.document.findUnique({
       where: { id },
     });
     
     if (!document) {
       return c.json({ error: "Document not found" }, 404);
+    }
+    
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
     }
     
     return c.json({ document });
@@ -89,10 +105,14 @@ export const getDocument = async (c: Context) => {
   }
 };
 
-// NEW: Generate signed download URL
 export const getDownloadUrl = async (c: Context) => {
   try {
     const id = c.req.param('id');
+    
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
     
     const document = await prisma.document.findUnique({
       where: { id },
@@ -102,13 +122,16 @@ export const getDownloadUrl = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
     
-    // Generate signed URL for download
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+    
     const command = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET!,
       Key: document.fileKey,
     });
     
-    const downloadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 }); // 1 hour
+    const downloadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
     
     return c.json({ downloadUrl });
   } catch (error) {

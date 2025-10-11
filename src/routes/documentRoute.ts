@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { getUploadUrl, saveDocument, getUserDocuments, getDocument, getDownloadUrl } from "../controllers/documentController";
-// import { authMiddleware } from "../middleware/authMiddleware";
+import { authMiddleware } from "../middleware/authMiddleware";
 
 export const documentRoute = new Hono()
-  // .use("*", authMiddleware)
+  .use("*", authMiddleware)
  .post("/upload/sign", getUploadUrl)
   .post("/", saveDocument)          
   .get("/", getUserDocuments)
