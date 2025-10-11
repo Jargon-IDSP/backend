@@ -4,10 +4,9 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3 } from '../config/s3';
 
 export const getUploadUrl = async (c: Context) => {
-  const user = c.get("user");
   const { filename, type } = await c.req.json();
   
-  const key = `documents/${user.id}/${Date.now()}-${filename}`;
+    const key = `documents/test/${Date.now()}-${filename}`;
   
   const command = new PutObjectCommand({
     Bucket: process.env.S3_BUCKET!,
