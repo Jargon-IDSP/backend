@@ -1,5 +1,6 @@
+// controllers/documentController.ts
 import type { Context } from "hono";
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3 } from '../config/s3';
 import { prisma } from '../lib/prisma';
@@ -33,13 +34,13 @@ export const saveDocument = async (c: Context) => {
     
     const userId = "test-user"; 
     
-const fileUrl = `${process.env.S3_ENDPOINT}/${process.env.S3_BUCKET}/${fileKey}`;
-    
+    // Don't store a URL - just store the key
+    // We'll generate signed URLs on-demand
     const document = await prisma.document.create({
       data: {
         filename,
         fileKey,
-        fileUrl,
+        fileUrl: fileKey,  // Store the key, not a full URL
         fileType,
         fileSize: fileSize || null,
         userId,
@@ -84,6 +85,34 @@ export const getDocument = async (c: Context) => {
     return c.json({ document });
   } catch (error) {
     console.error("Get document error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
+
+// NEW: Generate signed download URL
+export const getDownloadUrl = async (c: Context) => {
+  try {
+    const id = c.req.param('id');
+    
+    const document = await prisma.document.findUnique({
+      where: { id },
+    });
+    
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+    
+    // Generate signed URL for download
+    const command = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET!,
+      Key: document.fileKey,
+    });
+    
+    const downloadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 }); // 1 hour
+    
+    return c.json({ downloadUrl });
+  } catch (error) {
+    console.error("Get download URL error:", error);
     return c.json({ error: String(error) }, 500);
   }
 };

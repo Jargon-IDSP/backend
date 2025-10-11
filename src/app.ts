@@ -9,7 +9,7 @@ import { profileRoute } from "./routes/profileRoute";
 import { flashcardRoute } from "./routes/flashcardRoute";
 import { questionRoute } from "./routes/questionRoute";
 import { initializeCache } from "./controllers/flashcardController";
-import { addDocumentRoute } from "./routes/documentRoute";
+import { documentRoute } from "./routes/documentRoute";
 
 export const app = new Hono();
 
@@ -31,7 +31,7 @@ app.route("/help", helpRoute);
 app.route("/profile", profileRoute);
 app.route("/flashcards", flashcardRoute);
 app.route("/questions", questionRoute);
-app.route("/documents", addDocumentRoute);
+app.route("/documents", documentRoute);
 
 
 await initializeCache();
