@@ -84,3 +84,88 @@ model Question {
   
   @@map("questions")
 }
+
+
+model Document {
+  id        String   @id @default(cuid())
+  filename  String
+  fileKey   String  
+  fileUrl   String   
+  fileType  String   
+  fileSize  Int?     
+  
+  userId    String   
+  
+  quizId    String?  
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  flashcards CustomFlashcard[]
+  
+  @@index([userId])
+  @@index([quizId])
+  @@map("documents")
+}
+
+model CustomFlashcard {
+  id String @id @default(cuid())
+  
+  documentId String
+  userId     String
+  
+  termEnglish  String @db.Text
+  termFrench   String @db.Text
+  termChinese  String @db.Text
+  termSpanish  String @db.Text
+  termTagalog  String @db.Text
+  termPunjabi  String @db.Text
+  termKorean   String @db.Text
+  
+  definitionEnglish  String @db.Text
+  definitionFrench   String @db.Text
+  definitionChinese  String @db.Text
+  definitionSpanish  String @db.Text
+  definitionTagalog  String @db.Text
+  definitionPunjabi  String @db.Text
+  definitionKorean   String @db.Text
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  questions CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
+  
+  @@index([documentId])
+  @@index([userId])
+  @@index([termEnglish(length: 255)])
+  @@map("custom_flashcards")
+}
+
+model CustomQuestion {
+  id String @id @default(cuid())
+  
+  userId String
+  quizId String?
+  
+  correctTermId String
+  
+  promptEnglish  String @db.Text
+  promptFrench   String @db.Text
+  promptChinese  String @db.Text
+  promptSpanish  String @db.Text
+  promptTagalog  String @db.Text
+  promptPunjabi  String @db.Text
+  promptKorean   String @db.Text
+  
+  tags String @db.Text
+  
+  createdAt DateTime @default(now())
+  
+  correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
+  
+  @@index([userId])
+  @@index([quizId])
+  @@index([correctTermId])
+  @@map("custom_questions")
+}
