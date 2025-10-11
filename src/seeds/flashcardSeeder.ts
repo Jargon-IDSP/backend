@@ -122,7 +122,7 @@ async function importData() {
     const validLevelIds = levelsData.map(l => l.id)
     
     const invalidIndustry = flashcardsData.filter(card => 
-      card.industry_id !== null && !validIndustryIds.includes(card.industry_id)
+      card.industry_id === null && !validIndustryIds.includes(card.industry_id)
     )
   const invalidLevel = flashcardsData.filter(card => 
   !validLevelIds.includes(card.level_id)

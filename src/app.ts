@@ -9,11 +9,21 @@ import { profileRoute } from "./routes/profileRoute";
 import { flashcardRoute } from "./routes/flashcardRoute";
 import { questionRoute } from "./routes/questionRoute";
 import { initializeCache } from "./controllers/flashcardController";
+import { addDocumentRoute } from "./routes/documentRoute";
 
 export const app = new Hono();
 
 app.use("*", logger());
-app.use("/*", cors());
+app.use("*", cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://frontend-cl3c.onrender.com'
+  ],
+  credentials: true,
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.route("/", homeRoute);
 app.route("/chat", chatRoute);
@@ -21,5 +31,7 @@ app.route("/help", helpRoute);
 app.route("/profile", profileRoute);
 app.route("/flashcards", flashcardRoute);
 app.route("/questions", questionRoute);
+app.route("/documents", addDocumentRoute);
+
 
 await initializeCache();
