@@ -87,31 +87,28 @@ model Question {
 
 
 model Document {
-  id        String   @id @default(cuid())
-  filename  String
-  fileKey   String  
-  fileUrl   String   
-  fileType  String   
-  fileSize  Int?     
-  
-  userId    String   
-  
-  quizId    String?  
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
+  filename      String
+  fileKey       String
+  fileUrl       String
+  fileType      String
+  fileSize      Int?
+  extractedText String?   @db.Text
+  ocrProcessed  Boolean   @default(false)
+  userId        String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   
   flashcards CustomFlashcard[]
   
   @@index([userId])
-  @@index([quizId])
   @@map("documents")
 }
 
 model CustomFlashcard {
   id String @id @default(cuid())
   
-  documentId String
+  documentId String?
   userId     String
   
   termEnglish  String @db.Text
@@ -133,7 +130,7 @@ model CustomFlashcard {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   questions CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
   
   @@index([documentId])
