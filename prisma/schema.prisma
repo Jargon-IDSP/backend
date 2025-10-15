@@ -154,9 +154,7 @@ model CustomQuestion {
   promptTagalog  String @db.Text
   promptPunjabi  String @db.Text
   promptKorean   String @db.Text
-  
-  tags String @db.Text
-  
+    
   createdAt DateTime @default(now())
   
   correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
