@@ -1,4 +1,4 @@
-import type { Flashcard, Industry, Level, CustomFlashcard, Document } from '@prisma/client'
+import type { Flashcard, Industry, Level } from '@prisma/client'
 
 export interface flashcardJson {
   id: string

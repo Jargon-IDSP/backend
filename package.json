@@ -8,6 +8,7 @@
     "seed": "tsx src/seeds/flashcardSeeder.ts",
     "seed-questions": "tsx src/seeds/questionSeeder.ts",
     "seed-all": "npm run seed && npm run seed-questions",
+    "migrate-users": "tsx src/scripts/migrateUsers.ts",
     "build": "prisma generate && tsc",
     "postinstall": "prisma generate"
   },
@@ -34,7 +35,8 @@
     "hono": "^4.9.6",
     "mysql": "^2.18.1",
     "node-cache": "^5.1.2",
-    "prisma": "^6.16.2"
+    "prisma": "^6.16.2",
+    "svix": "^1.77.0"
   },
   "devDependencies": {
     "@hono/node-server": "^1.19.4",
