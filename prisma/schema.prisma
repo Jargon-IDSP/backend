@@ -99,6 +99,7 @@ model Document {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   flashcards CustomFlashcard[]
   
   @@index([userId])
@@ -130,7 +131,8 @@ model CustomFlashcard {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document Document?          @relation(fields: [documentId], references: [id], onDelete: SetNull)
   questions CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
   
   @@index([documentId])
@@ -157,10 +159,30 @@ model CustomQuestion {
     
   createdAt DateTime @default(now())
   
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
   
   @@index([userId])
   @@index([quizId])
   @@index([correctTermId])
   @@map("custom_questions")
+}
+
+model User {
+  id        String   @id
+  email     String
+  firstName String?
+  lastName  String?
+  username  String?
+  score     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  documents        Document[]
+  customFlashcards CustomFlashcard[]
+  customQuestions  CustomQuestion[]
+  
+  @@index([email])
+  @@index([score])
+  @@map("users")
 }
