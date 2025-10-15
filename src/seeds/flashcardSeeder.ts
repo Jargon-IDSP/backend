@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { flashcardJson, LevelData, IndustryData } from '../interfaces/flashcardData'
 
-const dataDirectory = './terms-jsons'
+const dataDirectory = '../jargon-terms'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
@@ -49,9 +49,12 @@ function loadAllFlashcardsFromDirectory(baseDir: string): flashcardJson[] {
         .sort()
       
       for (const file of files) {
-        const filePath = path.join(folderPath, file)
-        const fileData = loadJsonFile<flashcardJson>(filePath, `${folder.name}/${file}`)
-        allFlashcards.push(...fileData)
+        // Only load files that contain words (not questions)
+        if (file.includes('words') || file.includes('word')) {
+          const filePath = path.join(folderPath, file)
+          const fileData = loadJsonFile<flashcardJson>(filePath, `${folder.name}/${file}`)
+          allFlashcards.push(...fileData)
+        }
       }
     }
     
