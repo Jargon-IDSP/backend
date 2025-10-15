@@ -123,8 +123,9 @@ model Document {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
-  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  flashcards CustomFlashcard[]
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcards   CustomFlashcard[]
+  customQuizzes CustomQuiz[]      
   
   @@index([userId])
   @@map("documents")
@@ -169,8 +170,8 @@ model CustomQuestion {
   id String @id @default(cuid())
   
   userId String
-  quizId String?
-  
+  customQuizId String?  
+
   correctTermId String
   
   promptEnglish  String @db.Text
@@ -183,13 +184,54 @@ model CustomQuestion {
     
   createdAt DateTime @default(now())
   
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
+  customQuiz    CustomQuiz?     @relation(fields: [customQuizId], references: [id], onDelete: SetNull)
   
   @@index([userId])
-  @@index([quizId])
+  @@index([customQuizId])  // Change from quizId to customQuizId
   @@index([correctTermId])
   @@map("custom_questions")
+}
+
+model CustomQuiz {
+  id String @id @default(cuid())
+  
+  userId     String   
+  documentId String?    
+  
+  completed   Boolean  @default(false)
+  score       Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document  Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  questions CustomQuestion[]
+  
+  sharedWith CustomQuizShare[]
+  
+  @@index([userId])
+  @@index([documentId])
+  @@map("custom_quizzes")
+}
+
+model CustomQuizShare {
+  id String @id @default(cuid())
+  
+  customQuizId String
+  sharedWithUserId String
+  
+  sharedAt DateTime @default(now())
+  
+  customQuiz CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  sharedWith User       @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  
+  @@unique([customQuizId, sharedWithUserId])
+  @@index([customQuizId])
+  @@index([sharedWithUserId])
+  @@map("custom_quiz_shares")
 }
 
 model User {
@@ -209,17 +251,22 @@ model User {
   customFlashcards CustomFlashcard[]
   customQuestions  CustomQuestion[]
   quizzes          Quiz[]
+  customQuizzes    CustomQuiz[]           // Quizzes created by user
   
   industry Industry? @relation(fields: [industryId], references: [id])
   
   friendshipsInitiated Friendship[] @relation("FriendshipRequester")
   friendshipsReceived  Friendship[] @relation("FriendshipAddressee")
   
+  sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")  // Quizzes shared with user
+  
   @@index([email])
   @@index([score])
   @@index([industryId])
   @@map("users")
 }
+
+
 
 model UserAvatar {
   id     String @id @default(cuid())
