@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { authMiddleware } from "../middleware/authMiddleware";
 import {
   getUploadUrl,
   saveDocument,
@@ -6,14 +7,17 @@ import {
   getDocument,
   getDownloadUrl,
   deleteDocument,
+  triggerOCR,
+  // saveOCRResult,
 } from "../controllers/documentController";
-import { authMiddleware } from "../middleware/authMiddleware";
 
 export const documentRoute = new Hono()
   .use("*", authMiddleware)
   .post("/upload/sign", getUploadUrl)
-  .get("/:id/download", getDownloadUrl)
-  .delete("/:id", deleteDocument)
-  .get("/:id", getDocument)
+  // .post("/ocr-result", saveOCRResult)
+  .get("/", getUserDocuments)
   .post("/", saveDocument)
-  .get("/", getUserDocuments);
+  .post("/:id/ocr", triggerOCR)
+  .get("/:id/download", getDownloadUrl)
+  .get("/:id", getDocument)
+  .delete("/:id", deleteDocument);
