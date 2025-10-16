@@ -85,6 +85,7 @@ model Question {
   correctAnswer Flashcard @relation("QuestionCorrectAnswer", fields: [correctTermId], references: [id])
   quiz          Quiz?     @relation(fields: [quizId], references: [id], onDelete: SetNull)
   
+   @@index([correctTermId], map: "questions_correctTermId_fkey")
   @@index([quizId])
   @@map("questions")
 }
