@@ -12,6 +12,7 @@ import { questionRoute } from "./routes/questionRoute";
 import { initializeCache } from "./controllers/flashcardController";
 import { documentRoute } from "./routes/documentRoute";
 import webhookRoute from "./routes/webhookRoute";
+import { leaderboardRoute } from "./routes/leaderboardRoute";
 
 export const app = new Hono();
 
@@ -39,6 +40,7 @@ app.route("/flashcards", flashcardRoute);
 app.route("/questions", questionRoute);
 app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
+app.route("/leaderboard", leaderboardRoute);
 
 // Add this test endpoint to your routes
 app.post("/test-nanonets-url", async (c) => {
