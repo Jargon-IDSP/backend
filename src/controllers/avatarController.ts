@@ -1,3 +1,6 @@
+import type { Context } from "hono";
+import { prisma } from "../lib/prisma";
+
 // controllers/avatarController.ts
 export const avatar = async (c: Context) => {
   const user = c.get("user");
