@@ -88,14 +88,15 @@ export interface CustomFlashcardDisplay {
 }
 
 export interface Document {
-id: string
+  id: string
   filename: string
   fileKey: string
   fileUrl: string
   fileType: string
   fileSize: number | null
+  extractedText?: string | null  
+  ocrProcessed: boolean          
   userId: string
-  quizId: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -106,6 +107,8 @@ export interface DocumentDisplay {
   fileUrl: string
   fileType: string
   fileSize: number | null
+  extractedText?: string | null 
+  ocrProcessed?: boolean       
   createdAt: Date
 }
 
