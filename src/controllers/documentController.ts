@@ -1,4 +1,3 @@
-// controllers/documentController.ts
 import type { Context } from "hono";
 import {
   PutObjectCommand,
@@ -157,7 +156,6 @@ export const deleteDocument = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Find the document
     const document = await prisma.document.findUnique({
       where: { id },
     });
@@ -170,7 +168,6 @@ export const deleteDocument = async (c: Context) => {
       return c.json({ error: "Forbidden" }, 403);
     }
 
-    // Delete from S3
     const deleteCommand = new DeleteObjectCommand({
       Bucket: process.env.S3_BUCKET!,
       Key: document.fileKey,
@@ -178,7 +175,6 @@ export const deleteDocument = async (c: Context) => {
 
     await s3.send(deleteCommand);
 
-    // Delete from database
     await prisma.document.delete({
       where: { id },
     });
@@ -216,7 +212,6 @@ export const triggerOCR = async (c: Context) => {
     console.log("Filename:", document.filename);
     console.log("File Type:", document.fileType);
 
-    // Prepare Nanonets API call
     const apiKey = process.env.NANONETS_API_KEY;
     const modelId = process.env.NANONETS_MODEL_ID;
 
@@ -227,7 +222,6 @@ export const triggerOCR = async (c: Context) => {
     console.log("Uploading to Nanonets API...");
     console.log("Model ID:", modelId);
 
-    // Get the file from R2/S3
     const getCommand = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET!,
       Key: document.fileKey,
@@ -236,7 +230,6 @@ export const triggerOCR = async (c: Context) => {
     console.log("Downloading file from R2...");
     const s3Response = await s3.send(getCommand);
 
-    // Convert stream to buffer
     const chunks: Uint8Array[] = [];
     for await (const chunk of s3Response.Body as any) {
       chunks.push(chunk);
@@ -244,7 +237,6 @@ export const triggerOCR = async (c: Context) => {
     const fileBuffer = Buffer.concat(chunks);
     console.log("File downloaded, size:", fileBuffer.length, "bytes");
 
-    // Save to temporary file
     const tempDir = os.tmpdir();
     const tempFilePath = path.join(
       tempDir,
@@ -257,11 +249,9 @@ export const triggerOCR = async (c: Context) => {
 
     let ocrResult;
     try {
-      // Create FormData with file stream
       const FormData = (await import("form-data")).default;
       const formData = new FormData();
 
-      // Use createReadStream for proper file streaming
       formData.append("file", fs.createReadStream(tempFilePath), {
         filename: document.filename,
         contentType: document.fileType || "application/octet-stream",
@@ -269,7 +259,6 @@ export const triggerOCR = async (c: Context) => {
 
       console.log("FormData created with file stream, making API call...");
 
-      // Use SYNC endpoint for immediate results (simpler, works for files under 3 pages)
       const nanoResponse = await axios.post(
         `https://app.nanonets.com/api/v2/OCR/Model/${modelId}/LabelFile/`,
         formData,
@@ -282,14 +271,13 @@ export const triggerOCR = async (c: Context) => {
           },
           maxBodyLength: Infinity,
           maxContentLength: Infinity,
-          timeout: 120000, // 2 minute timeout for sync processing
+          timeout: 120000, 
         }
       );
 
       console.log("Nanonets Response Status:", nanoResponse.status);
       console.log("Sync processing complete");
 
-      // Parse Nanonets response (sync returns predictions immediately)
       ocrResult = nanoResponse.data;
       console.log(
         "OCR Result received from Nanonets:",
@@ -299,7 +287,6 @@ export const triggerOCR = async (c: Context) => {
       console.error("Upload to Nanonets failed:", uploadError);
       throw uploadError;
     } finally {
-      // Clean up temp file - this runs AFTER axios completes (success or fail)
       try {
         if (fs.existsSync(tempFilePath)) {
           fs.unlinkSync(tempFilePath);
@@ -310,7 +297,6 @@ export const triggerOCR = async (c: Context) => {
       }
     }
 
-    // Extract text from Nanonets response (ALL PAGES, ALL TEXT)
     let extractedText = "";
     let terms: Array<{ term: string; definition: string }> = [];
     let allTextSegments: string[] = [];
@@ -320,7 +306,6 @@ export const triggerOCR = async (c: Context) => {
         `Processing ${ocrResult.result.length} pages from OCR result`
       );
 
-      // Process ALL pages in the result
       for (const pageResult of ocrResult.result) {
         const prediction = pageResult.prediction;
         const pageNumber = pageResult.page;
@@ -331,7 +316,6 @@ export const triggerOCR = async (c: Context) => {
               `Page ${pageNumber}: Found ${prediction.length} predictions`
             );
 
-            // Extract ALL OCR text from this page (regardless of label)
             const pageText = prediction
               .map((pred: any) => pred.ocr_text || "")
               .filter((text: string) => text.trim())
@@ -343,7 +327,6 @@ export const triggerOCR = async (c: Context) => {
               );
             }
 
-            // Extract term-definition pairs from this page
             for (let i = 0; i < prediction.length; i++) {
               const pred = prediction[i];
               if (
@@ -363,7 +346,6 @@ export const triggerOCR = async (c: Context) => {
             console.log(
               `Page ${pageNumber}: Empty predictions array - may be a blank page or OCR failed`
             );
-            // Still add a marker for this page
             allTextSegments.push(
               `\n=== Page ${
                 pageNumber + 1
@@ -375,7 +357,6 @@ export const triggerOCR = async (c: Context) => {
         }
       }
 
-      // Combine all text from all pages
       extractedText = allTextSegments.join("\n");
 
       console.log("Total extracted text length:", extractedText.length);
@@ -388,7 +369,6 @@ export const triggerOCR = async (c: Context) => {
       console.warn("No OCR results found in Nanonets response");
     }
 
-    // Update document with OCR results
     const updatedDocument = await prisma.document.update({
       where: { id },
       data: {
@@ -399,7 +379,6 @@ export const triggerOCR = async (c: Context) => {
 
     console.log("Document updated with OCR results");
 
-    // Create flashcards if terms were extracted
     let flashcardsCreated = 0;
     if (terms && terms.length > 0) {
       const flashcards = await Promise.all(
@@ -445,7 +424,6 @@ export const triggerOCR = async (c: Context) => {
   } catch (error) {
     console.error("=== OCR Processing Error ===");
 
-    // Handle axios-specific errors
     if (axios.isAxiosError(error) && error.response) {
       console.error("Nanonets Error Response:", error.response.data);
       return c.json(
@@ -458,7 +436,6 @@ export const triggerOCR = async (c: Context) => {
       );
     }
 
-    // Handle other errors
     console.error(error);
     return c.json(
       {

@@ -24,17 +24,14 @@ async function migrateUsersFromClerk() {
   try {
     console.log("Starting user migration from Clerk...");
 
-    // Validate environment
     if (!process.env.CLERK_SECRET_KEY) {
       throw new Error("CLERK_SECRET_KEY environment variable is not set!");
     }
 
     console.log("Environment validated");
 
-    // Initialize Clerk client
     const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
-    // Fetch users from Clerk
     console.log("Fetching users from Clerk...");
     const clerkUsers = await clerk.users.getUserList({ limit: 500 });
     console.log(`Found ${clerkUsers.data.length} users in Clerk`);
@@ -45,7 +42,6 @@ async function migrateUsersFromClerk() {
 
     for (const clerkUser of clerkUsers.data) {
       try {
-        // Get primary email
         const primaryEmail = clerkUser.emailAddresses.find(
           (email) => email.id === clerkUser.primaryEmailAddressId
         )?.emailAddress;
@@ -66,7 +62,6 @@ async function migrateUsersFromClerk() {
           continue;
         }
 
-        // Create user in database
         await prisma.user.create({
           data: {
             id: clerkUser.id,

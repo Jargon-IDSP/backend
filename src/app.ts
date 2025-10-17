@@ -2,13 +2,9 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import axios from "axios";
-
-import { homeRoute } from "./routes/homeRoute";
 import { chatRoute } from "./routes/chatRoute";
 import { helpRoute } from "./routes/helpRoute";
 import { profileRoute } from "./routes/profileRoute";
-import { flashcardRoute } from "./routes/flashcardRoute";
-import { questionRoute } from "./routes/questionRoute";
 import { initializeCache } from "./controllers/flashcardController";
 import { documentRoute } from "./routes/documentRoute";
 import webhookRoute from "./routes/webhookRoute";
@@ -33,18 +29,14 @@ app.use(
   })
 );
 
-app.route("/", homeRoute);
 app.route("/chat", chatRoute);
 app.route("/help", helpRoute);
 app.route("/profile", profileRoute);
-app.route("/flashcards", flashcardRoute);
-app.route("/questions", questionRoute);
 app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
 app.route("/leaderboard", leaderboardRoute);
-app.route("/learning", learningRoute);
+app.route("/learning", learningRoute); 
 
-// Add this test endpoint to your routes
 app.post("/test-nanonets-url", async (c) => {
   try {
     const apiKey = process.env.NANONETS_API_KEY!;

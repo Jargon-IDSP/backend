@@ -1,39 +1,57 @@
 import { Hono } from "hono";
+const prismaModule = await import('@prisma/client') as any;
+const { PrismaClient } = prismaModule;
 import { authMiddleware } from "../middleware/authMiddleware";
+
+import {
+  getFlashcards,
+  getRandomFlashcard,
+  getFlashcardsByLevel,
+  getPracticeTermsByLevel,
+  getLevels,
+  getCustomFlashcardsByDocument,
+  getCustomFlashcardsByUser,
+  getRandomCustomFlashcard,
+} from "../controllers/flashcardController";
+
+import {
+  getQuestionsByLevel,
+  getRandomQuestion,
+  getCustomQuestionsByDocument,
+  getCustomQuestionsByUser,
+  getRandomCustomQuestion,
+  getQuizzesByLevel,
+  getCustomQuizzesByDocument,
+  getCustomQuizzesByUser,
+  generateQuizForLevel,
+  generateCustomQuiz,
+} from "../controllers/questionController";
+
+const prisma = new PrismaClient();
 
 export const learningRoute = new Hono()
   .use("*", authMiddleware)
-  // Existing learning paths - level-based
-  .get("/existing/levels", (c) => {
-    // Get available levels for existing content
-    return c.json({ page: "existing-levels" });
-  })
-  .get("/existing/levels/:level/terms", (c) => {
-    const level = c.req.param("level");
-    return c.json({ page: "existing-terms", level });
-  })
-  .get("/existing/levels/:level/quiz", (c) => {
-    const level = c.req.param("level");
-    return c.json({ page: "existing-quiz", level });
-  })
-  .get("/existing/levels/:level/quiz/questions", (c) => {
-    const level = c.req.param("level");
-    return c.json({ page: "existing-quiz-questions", level });
-  })
-  // Custom learning paths
-  .get("/custom/practice-questions", (c) => {
-    return c.json({ page: "custom-practice-questions" });
-  })
-  .get("/custom/practice-questions/:id", (c) => {
-    return c.json({ page: "custom-practice-questions-detail", id: c.req.param("id") });
-  })
-  .get("/custom/practice-terms", (c) => {
-    return c.json({ page: "custom-practice-terms" });
-  })
-  .get("/custom/practice-terms/:id", (c) => {
-    return c.json({ page: "custom-practice-terms-detail", id: c.req.param("id") });
-  })
-  .get("/custom/quiz/:quizNumber", (c) => {
-    const quizNumber = c.req.param("quizNumber");
-    return c.json({ page: "custom-quiz", quizNumber });
-  });
+
+  .get("/existing/levels/:levelId/terms", getPracticeTermsByLevel)
+  .get("/existing/random/flashcard", getRandomFlashcard)
+  
+  .get("/custom/documents/:documentId/terms", getCustomFlashcardsByDocument)
+  .get("/custom/terms", getCustomFlashcardsByUser)
+  .get("/custom/random/flashcard", getRandomCustomFlashcard)
+
+  .get("/existing/levels/:levelId/questions", getQuestionsByLevel)
+  .get("/existing/random/question", getRandomQuestion)
+  
+  .get("/custom/documents/:documentId/questions", getCustomQuestionsByDocument)
+  .get("/custom/questions", getCustomQuestionsByUser)
+  .get("/custom/random/question", getRandomCustomQuestion)
+
+  .get("/existing/levels/:levelId/quiz/generate", generateQuizForLevel)
+  .get("/custom/quiz/generate", generateCustomQuiz)
+
+  .get("/existing/levels/:levelId/quizzes", getQuizzesByLevel)
+  .get("/custom/documents/:documentId/quizzes", getCustomQuizzesByDocument)
+  .get("/custom/quizzes", getCustomQuizzesByUser)
+
+  .get("/:type/levels", getLevels)
+  .get("/:type/levels/:levelId", getLevels);

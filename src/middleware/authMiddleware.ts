@@ -4,7 +4,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Extend Hono's Context to include user information
 declare module "hono" {
   interface ContextVariableMap {
     user: {
@@ -31,7 +30,6 @@ async function syncUserToDatabase(clerkUser: any) {
     });
 
     if (existingUser) {
-      // Update existing user
       await prisma.user.update({
         where: { id: clerkUser.id },
         data: {
@@ -44,7 +42,6 @@ async function syncUserToDatabase(clerkUser: any) {
       });
       console.log(`Updated user: ${primaryEmail} (${clerkUser.id})`);
     } else {
-      // Create new user
       await prisma.user.create({
         data: {
           id: clerkUser.id,
@@ -61,19 +58,20 @@ async function syncUserToDatabase(clerkUser: any) {
     }
   } catch (error) {
     console.error(`Error syncing user ${clerkUser.id}:`, error);
-    // Don't throw error to avoid breaking authentication
   }
 }
 
 export const authMiddleware = async (c: Context, next: Next) => {
+  console.log("🔒 AUTH MIDDLEWARE CALLED");
+  console.log("Path:", c.req.path);
+  console.log("Method:", c.req.method);
+  console.log("Headers:", c.req.header("Authorization") ? "Present" : "Missing");
   try {
-    // Validate environment
     if (!process.env.CLERK_SECRET_KEY) {
       console.error("CLERK_SECRET_KEY not configured");
       return c.json({ error: "Server configuration error: Missing Clerk secret key" }, 500);
     }
 
-    // Get and validate authorization header
     const authHeader = c.req.header("Authorization");
     if (!authHeader) {
       return c.json({ error: "No authorization header provided" }, 401);
@@ -84,7 +82,6 @@ export const authMiddleware = async (c: Context, next: Next) => {
       return c.json({ error: "No token provided" }, 401);
     }
 
-    // Verify token
     console.log("Verifying token...");
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY!,
@@ -96,7 +93,6 @@ export const authMiddleware = async (c: Context, next: Next) => {
 
     console.log("Token verified for user:", payload.sub);
 
-    // Fetch user data from Clerk
     const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
     const clerkUser = await clerk.users.getUser(payload.sub);
     
@@ -106,10 +102,8 @@ export const authMiddleware = async (c: Context, next: Next) => {
       name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
     });
 
-    // Sync user to database
     await syncUserToDatabase(clerkUser);
 
-    // Set user context
     const user = {
       id: clerkUser.id,
       email: clerkUser.primaryEmailAddress?.emailAddress || "",

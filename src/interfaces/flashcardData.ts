@@ -50,7 +50,6 @@ export interface CustomFlashcard {
 
 export interface LevelData {
   id: number
-  level_number: number
   name: string
 }
 
