@@ -1,124 +1,567 @@
 import type { Context } from "hono";
+const prismaModule = (await import("@prisma/client")) as any;
+const { PrismaClient } = prismaModule;
+import {
+  extractQueryParams,
+  extractRouteParams,
+  buildWhereClause,
+} from "./helperFunctions/flashcardHelper";
+import {
+  enrichQuestion,
+  enrichCustomQuestion,
+  enrichQuestionWithChoices,
+  shuffleArray,
+} from "./helperFunctions/questionHelper";
+import {
+  generateCacheKey,
+  withCache,
+} from "./helperFunctions/cacheHelper";
+import {
+  errorResponse,
+  successResponse,
+} from "./helperFunctions/responseHelper";
 
-// Dynamic import to avoid TypeScript module resolution issues
-const prismaModule = await import('@prisma/client') as any
-const { PrismaClient } = prismaModule
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
-// Helper function to get random wrong answers
-async function getRandomWrongAnswers(correctTermId: string, count: number = 3) {
-  const allFlashcards = await prisma.flashcard.findMany({
-    where: {
-      id: {
-        not: correctTermId // Exclude the correct answer
-      }
+// Existing Questions
+
+export const getQuestionsByLevel = async (c: Context) => {
+  try {
+    const { levelId } = extractRouteParams(c);
+    const { language, industryId } = extractQueryParams(c);
+
+    if (!levelId) {
+      return errorResponse(c, "Level ID is required", 400);
     }
-  });
-  
-  // Shuffle and take the requested number
-  const shuffled = allFlashcards.sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
-}
 
-// Helper function to shuffle array
-function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const temp = shuffled[i]!;
-    shuffled[i] = shuffled[j]!;
-    shuffled[j] = temp;
+    const cacheKey = generateCacheKey("questions-level", { levelId, language, industryId });
+
+    const response = await withCache(cacheKey, async () => {
+      const questions = await prisma.question.findMany({
+        where: {
+          correctAnswer: {
+            levelId: parseInt(levelId),
+            ...(industryId && { industryId: parseInt(industryId) }),
+          },
+        },
+        include: {
+          correctAnswer: {
+            include: {
+              level: true,
+              industry: true,
+            },
+          },
+        },
+      });
+
+      if (questions.length === 0) {
+        throw new Error("No questions found for this level");
+      }
+
+      const displayQuestions = questions.map((q: any) => enrichQuestion(q, language));
+
+      return successResponse(displayQuestions, {
+        count: questions.length,
+        level_id: levelId,
+        filters: { language, industry_id: industryId },
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching questions by level:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch questions by level",
+      error.message === "No questions found for this level" ? 404 : 500
+    );
   }
-  return shuffled;
-}
+};
 
-// Helper function to format choices for display
-function formatChoices(correctAnswer: any, wrongAnswers: any[], language: string = 'english') {
-  // Create all choices without IDs first
-  const allChoices = [
-    {
-      term: correctAnswer[`term${language.charAt(0).toUpperCase() + language.slice(1)}`],
-      isCorrect: true,
-      termId: correctAnswer.id
-    },
-    ...wrongAnswers.map((answer) => ({
-      term: answer[`term${language.charAt(0).toUpperCase() + language.slice(1)}`],
-      isCorrect: false,
-      termId: answer.id
-    }))
-  ];
-  
-  // Shuffle the choices
-  const shuffledChoices = shuffleArray(allChoices);
-  
-  // Assign IDs A, B, C, D after shuffling
-  return shuffledChoices.map((choice, index) => ({
-    ...choice,
-    id: String.fromCharCode(65 + index) // A, B, C, D
-  }));
-}
-
-// Get a random quiz question with multiple choice options
 export const getRandomQuestion = async (c: Context) => {
   try {
-    const language = c.req.query('language') || 'english';
-    
-    // Get total count for random selection
-    const totalQuestions = await prisma.question.count();
-    
+    const { language, industryId, levelId } = extractQueryParams(c);
+
+    const whereClause: any = {
+      correctAnswer: {
+        ...(levelId && { levelId: parseInt(levelId) }),
+        ...(industryId && { industryId: parseInt(industryId) }),
+      },
+    };
+
+    const totalQuestions = await prisma.question.count({ where: whereClause });
+
     if (totalQuestions === 0) {
-      return c.json({
-        success: false,
-        error: 'No questions found'
-      }, 404);
+      return errorResponse(c, "No questions found matching the criteria", 404);
     }
-    
-    // Get random question
+
     const randomOffset = Math.floor(Math.random() * totalQuestions);
-    const question = await prisma.question.findMany({
+    const questions = await prisma.question.findMany({
       skip: randomOffset,
       take: 1,
+      where: whereClause,
       include: {
-        correctAnswer: true
-      }
+        correctAnswer: {
+          include: {
+            level: true,
+            industry: true,
+          },
+        },
+      },
     });
+
+    if (!questions || questions.length === 0) {
+      return errorResponse(c, "No question found", 404);
+    }
+
+    const selectedQuestion = questions[0];
     
-    if (!question || question.length === 0) {
-      return c.json({
-        success: false,
-        error: 'No question found'
-      }, 404);
+    const displayQuestion = await enrichQuestionWithChoices(
+      prisma,
+      selectedQuestion,
+      language,
+      false
+    );
+
+    return c.json(successResponse(displayQuestion, { selectedLanguage: language }));
+  } catch (error: any) {
+    console.error("Error fetching random question:", error);
+    return errorResponse(c, error.message || "Failed to fetch random question", 500);
+  }
+};
+
+// Custom Questions
+
+export const getCustomQuestionsByDocument = async (c: Context) => {
+  try {
+    const { documentId } = extractRouteParams(c);
+    const { language } = extractQueryParams(c);
+
+    if (!documentId) {
+      return errorResponse(c, "Document ID is required", 400);
+    }
+
+    const cacheKey = generateCacheKey("custom-questions-document", { documentId, language });
+
+    const response = await withCache(cacheKey, async () => {
+      const questions = await prisma.customQuestion.findMany({
+        where: {
+          correctAnswer: {
+            documentId,
+          },
+        },
+        include: {
+          correctAnswer: {
+            include: {
+              document: true,
+            },
+          },
+        },
+      });
+
+      if (questions.length === 0) {
+        throw new Error("No questions found for this document");
+      }
+
+      const displayQuestions = questions.map((q: any) => enrichCustomQuestion(q, language));
+
+      return successResponse(displayQuestions, {
+        count: questions.length,
+        document_id: documentId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom questions by document:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch custom questions",
+      error.message === "No questions found for this document" ? 404 : 500
+    );
+  }
+};
+
+export const getCustomQuestionsByUser = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    
+    if (!user || !user.id) {
+      return errorResponse(c, "User not authenticated", 401);
     }
     
-    const selectedQuestion = question[0];
-    
-    // Get 3 random wrong answers
-    const wrongAnswers = await getRandomWrongAnswers(selectedQuestion.correctTermId, 3);
-    
-    // Format the choices
-    const choices = formatChoices(selectedQuestion.correctAnswer, wrongAnswers, language);
-    
-    // Format the response
-    const response = {
-      success: true,
-      data: {
-        questionId: selectedQuestion.id,
-        prompt: selectedQuestion[`prompt${language.charAt(0).toUpperCase() + language.slice(1)}`],
-        choices: choices,
-        difficulty: selectedQuestion.difficulty,
-        tags: JSON.parse(selectedQuestion.tags),
-        language: language,
-        correctAnswerId: selectedQuestion.correctTermId
-      }
-    };
-    
+    const userId = user.id;
+    const { language } = extractQueryParams(c);
+
+    const cacheKey = generateCacheKey("custom-questions-user", { userId, language });
+
+    const response = await withCache(cacheKey, async () => {
+      const questions = await prisma.customQuestion.findMany({
+        where: { userId },
+        include: {
+          correctAnswer: {
+            include: {
+              document: true,
+            },
+          },
+        },
+      });
+
+      const displayQuestions = questions.map((q: any) => enrichCustomQuestion(q, language));
+
+      return successResponse(displayQuestions, {
+        count: questions.length,
+        user_id: userId,
+      });
+    });
+
     return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom questions by user:", error);
+    return errorResponse(c, error.message || "Failed to fetch custom questions", 500);
+  }
+};
+
+export const getRandomCustomQuestion = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user?.id;
+    const { language } = extractQueryParams(c);
+    const documentId = c.req.query("document_id");
+
+    if (!userId) {
+      return errorResponse(c, "User ID is required", 400);
+    }
+
+    const whereClause = buildWhereClause({ userId, documentId });
+
+    const totalQuestions = await prisma.customQuestion.count({ where: whereClause });
+
+    if (totalQuestions === 0) {
+      return errorResponse(c, "No custom questions found", 404);
+    }
+
+    const randomOffset = Math.floor(Math.random() * totalQuestions);
+    const questions = await prisma.customQuestion.findMany({
+      skip: randomOffset,
+      take: 1,
+      where: whereClause,
+      include: {
+        correctAnswer: {
+          include: {
+            document: true,
+          },
+        },
+      },
+    });
+
+    if (!questions || questions.length === 0) {
+      return errorResponse(c, "No question found", 404);
+    }
+
+    const selectedQuestion = questions[0];
     
-  } catch (error) {
-    console.error('Error fetching random question:', error);
-    return c.json({
-      success: false,
-      error: 'Failed to fetch random question'
-    }, 500);
+    const displayQuestion = await enrichQuestionWithChoices(
+      prisma,
+      selectedQuestion,
+      language,
+      true 
+    );
+
+    return c.json(successResponse(displayQuestion, { selectedLanguage: language }));
+  } catch (error: any) {
+    console.error("Error fetching random custom question:", error);
+    return errorResponse(c, error.message || "Failed to fetch random custom question", 500);
+  }
+};
+
+// ==================== QUIZZES ====================
+
+export const getQuizzesByLevel = async (c: Context) => {
+  try {
+    const { levelId } = extractRouteParams(c);
+    const user = c.get("user");
+    const userId = user?.id;
+
+    if (!levelId) {
+      return errorResponse(c, "Level ID is required", 400);
+    }
+
+    if (!userId) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+
+    const cacheKey = generateCacheKey("quizzes-level", { levelId, userId });
+
+    const response = await withCache(cacheKey, async () => {
+      const quizzes = await prisma.quiz.findMany({
+        where: {
+          levelId: parseInt(levelId),
+          userId,
+        },
+        include: {
+          level: true,
+          questions: {
+            include: {
+              correctAnswer: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      return successResponse(quizzes, {
+        count: quizzes.length,
+        level_id: levelId,
+        user_id: userId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching quizzes by level:", error);
+    return errorResponse(c, error.message || "Failed to fetch quizzes", 500);
+  }
+};
+
+export const getCustomQuizzesByDocument = async (c: Context) => {
+  try {
+    const { documentId } = extractRouteParams(c);
+    const user = c.get("user");
+    const userId = user?.id;
+
+    if (!documentId) {
+      return errorResponse(c, "Document ID is required", 400);
+    }
+
+    if (!userId) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+
+    const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId });
+
+    const response = await withCache(cacheKey, async () => {
+      const quizzes = await prisma.customQuiz.findMany({
+        where: {
+          documentId,
+          userId,
+        },
+        include: {
+          document: true,
+          questions: {
+            include: {
+              correctAnswer: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      return successResponse(quizzes, {
+        count: quizzes.length,
+        document_id: documentId,
+        user_id: userId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom quizzes by document:", error);
+    return errorResponse(c, error.message || "Failed to fetch custom quizzes", 500);
+  }
+};
+
+export const getCustomQuizzesByUser = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    
+    if (!user || !user.id) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+    
+    const userId = user.id;
+
+    const cacheKey = generateCacheKey("custom-quizzes-user", { userId });
+
+    const response = await withCache(cacheKey, async () => {
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { userId },
+        include: {
+          document: true,
+          questions: {
+            include: {
+              correctAnswer: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      return successResponse(quizzes, {
+        count: quizzes.length,
+        user_id: userId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom quizzes by user:", error);
+    return errorResponse(c, error.message || "Failed to fetch custom quizzes", 500);
+  }
+};
+
+export const generateQuizForLevel = async (c: Context) => {
+  try {
+    const { levelId } = extractRouteParams(c);
+    const { language, industryId } = extractQueryParams(c);
+    const quizNumber = parseInt(c.req.query("quiz_number") || "1");
+
+    if (!levelId) {
+      return errorResponse(c, "Level ID is required", 400);
+    }
+
+    if (quizNumber < 1 || quizNumber > 5) {
+      return errorResponse(c, "Quiz number must be between 1 and 5", 400);
+    }
+
+    const parsedLevelId = parseInt(levelId);
+    const parsedIndustryId = industryId ? parseInt(industryId) : null;
+
+    let industryQuestions: any[] = [];
+    if (parsedIndustryId) {
+      industryQuestions = await prisma.question.findMany({
+        where: {
+          correctAnswer: {
+            levelId: parsedLevelId,
+            industryId: parsedIndustryId,
+          },
+        },
+        include: {
+          correctAnswer: {
+            include: {
+              level: true,
+              industry: true,
+            },
+          },
+        },
+      });
+    }
+
+    const generalQuestions = await prisma.question.findMany({
+      where: {
+        correctAnswer: {
+          levelId: parsedLevelId,
+          industryId: null,
+        },
+      },
+      include: {
+        correctAnswer: {
+          include: {
+            level: true,
+          },
+        },
+      },
+    });
+
+    const allQuestions = [...industryQuestions, ...generalQuestions];
+    
+    if (allQuestions.length === 0) {
+      return errorResponse(c, "No questions available for this level", 404);
+    }
+
+    const shuffled = shuffleArray(allQuestions);
+    let quizQuestions = shuffled.slice(0, 10);
+    
+    while (quizQuestions.length < 10 && allQuestions.length > 0) {
+      const randomIndex = Math.floor(Math.random() * allQuestions.length);
+      quizQuestions.push(allQuestions[randomIndex]);
+    }
+
+    const enrichedQuestions = await Promise.all(
+      quizQuestions.map(async (q) => 
+        await enrichQuestionWithChoices(prisma, q, language, false)
+      )
+    );
+
+    return c.json(successResponse(enrichedQuestions, {
+      quiz_number: quizNumber,
+      level_id: levelId,
+      industry_id: industryId,
+      question_count: enrichedQuestions.length,
+      total_available: allQuestions.length,
+    }));
+  } catch (error: any) {
+    console.error("Error generating quiz for level:", error);
+    return errorResponse(c, error.message || "Failed to generate quiz", 500);
+  }
+};
+
+export const generateCustomQuiz = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    if (!user || !user.id) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+
+    const userId = user.id;
+    const { language } = extractQueryParams(c);
+    const documentId = c.req.query("document_id");
+    const quizNumber = parseInt(c.req.query("quiz_number") || "1");
+
+    const whereClause: any = { userId };
+    if (documentId) {
+      whereClause.correctAnswer = { documentId };
+    }
+
+    const customQuestions = await prisma.customQuestion.findMany({
+      where: whereClause,
+      include: {
+        correctAnswer: {
+          include: {
+            document: true,
+          },
+        },
+      },
+    });
+
+    if (customQuestions.length === 0) {
+      return errorResponse(c, "No custom questions found", 404);
+    }
+
+    const totalQuizzes = Math.ceil(customQuestions.length / 10);
+    
+    if (quizNumber > totalQuizzes) {
+      return errorResponse(
+        c,
+        `Only ${totalQuizzes} quiz${totalQuizzes === 1 ? '' : 'es'} available with your current questions`,
+        400
+      );
+    }
+
+    const shuffled = shuffleArray(customQuestions);
+    const questionsForQuiz = shuffled.slice(0, Math.min(10, customQuestions.length));
+
+    const enrichedQuestions = await Promise.all(
+      questionsForQuiz.map(async (q) => 
+        await enrichQuestionWithChoices(prisma, q, language, true)
+      )
+    );
+
+    return c.json(successResponse(enrichedQuestions, {
+      quiz_number: quizNumber,
+      total_quizzes: totalQuizzes,
+      question_count: enrichedQuestions.length,
+      total_questions_available: customQuestions.length,
+      document_id: documentId,
+    }));
+  } catch (error: any) {
+    console.error("Error generating custom quiz:", error);
+    return errorResponse(c, error.message || "Failed to generate custom quiz", 500);
   }
 };

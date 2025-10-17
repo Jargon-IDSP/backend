@@ -1,16 +1,28 @@
 import type { Context } from "hono";
 const prismaModule = (await import("@prisma/client")) as any;
 const { PrismaClient } = prismaModule;
-import type { FlashcardWithRelations } from "../interfaces/flashcardData";
-import NodeCache from "node-cache";
+import type { FlashcardWithRelations, LevelData } from "../interfaces/flashcardData";
+import {
+  extractQueryParams,
+  extractRouteParams,
+  buildWhereClause,
+  calculateAvailableTerms,
+  enrichFlashcard,
+  combineFlashcardsForPractice,
+  enrichCustomFlashcard,
+} from "./helperFunctions/flashcardHelper";
+import {
+  generateCacheKey,
+  withCache,
+  clearAllCache,
+  getCacheStatistics,
+} from "./helperFunctions/cacheHelper";
+import {
+  errorResponse,
+  successResponse,
+} from "./helperFunctions/responseHelper";
 
 const prisma = new PrismaClient();
-
-// Initialize cache with TTL (Time To Live)
-const responseCache = new NodeCache({
-  stdTTL: 300, // 5 minutes default TTL
-  checkperiod: 60, // Check for expired keys every 60 seconds
-});
 
 let flashcardCache: {
   id: string;
@@ -35,519 +47,520 @@ export const initializeCache = async () => {
   }
 };
 
-// Helper function to generate cache keys
-const generateCacheKey = (prefix: string, params: Record<string, any>) => {
-  const sortedParams = Object.keys(params)
-    .sort()
-    .map((key) => `${key}=${params[key] || "null"}`)
-    .join("&");
-  return `${prefix}:${sortedParams}`;
-};
-
-const convertToDisplayFormat = (dbFlashcard: any, language?: string) => {
-  const result: any = {
-    id: dbFlashcard.id,
-    term: {
-      english: dbFlashcard.termEnglish,
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish,
-    },
-    industry_id: dbFlashcard.industryId,
-    level_id: dbFlashcard.levelId,
-  };
-
-  if (language) {
-    result.term[language] = getTermByLanguage(dbFlashcard, language);
-    result.definition[language] = getDefinitionByLanguage(
-      dbFlashcard,
-      language
-    );
-  }
-  return result;
-};
-
-const getTermByLanguage = (dbFlashcard: any, language: string) => {
-  const languageMap: { [key: string]: string } = {
-    french: dbFlashcard.termFrench,
-    chinese: dbFlashcard.termChinese,
-    spanish: dbFlashcard.termSpanish,
-    tagalog: dbFlashcard.termTagalog,
-    punjabi: dbFlashcard.termPunjabi,
-    korean: dbFlashcard.termKorean,
-  };
-  return languageMap[language];
-};
-
-const getDefinitionByLanguage = (dbFlashcard: any, language: string) => {
-  const languageMap: { [key: string]: string } = {
-    french: dbFlashcard.definitionFrench,
-    chinese: dbFlashcard.definitionChinese,
-    spanish: dbFlashcard.definitionSpanish,
-    tagalog: dbFlashcard.definitionTagalog,
-    punjabi: dbFlashcard.definitionPunjabi,
-    korean: dbFlashcard.definitionKorean,
-  };
-  return languageMap[language];
-};
+// Default flashcard controllers
 
 export const getFlashcardsByLevel = async (c: Context) => {
   try {
-    const levelId = c.req.param("levelId");
-    const language = c.req.query("language");
+    const { levelId } = extractRouteParams(c);
+    const { language } = extractQueryParams(c);
 
     if (!levelId) {
-      return c.json(
-        {
-          success: false,
-          error: "Level ID is required",
-        },
-        400
-      );
+      return errorResponse(c, "Level ID is required", 400);
     }
 
-    // Check cache
     const cacheKey = generateCacheKey("level", { levelId, language });
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
 
-    const flashcards = await prisma.flashcard.findMany({
-      where: {
-        levelId: parseInt(levelId),
-      },
-      include: {
-        industry: true,
-        level: true,
-      },
+    const response = await withCache(cacheKey, async () => {
+      const flashcards = await prisma.flashcard.findMany({
+        where: { levelId: parseInt(levelId) },
+        include: {
+          industry: true,
+          level: true,
+        },
+      });
+
+      if (flashcards.length === 0) {
+        throw new Error("No flashcards found for this level");
+      }
+
+      const displayFlashcards = flashcards.map((card: FlashcardWithRelations) =>
+        enrichFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: flashcards.length,
+        level_id: levelId,
+      });
     });
 
-    if (flashcards.length === 0) {
-      return c.json(
-        {
-          success: false,
-          error: "No flashcards found for this level",
-        },
-        404
-      );
-    }
-
-    const displayFlashcards = flashcards.map(
-      (card: FlashcardWithRelations) => ({
-        ...convertToDisplayFormat(card, language),
-        industry: card.industry.name,
-        level: card.level.name,
-      })
-    );
-
-    const response = {
-      success: true,
-      count: flashcards.length,
-      data: displayFlashcards,
-      level_id: levelId,
-    };
-
-    // Store in cache
-    responseCache.set(cacheKey, response);
-    console.log(`Cache set: ${cacheKey}`);
-
     return c.json(response);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching flashcards by level:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch flashcards by level",
-      },
-      500
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch flashcards by level",
+      error.message === "No flashcards found for this level" ? 404 : 500
     );
   }
 };
 
 export const getFlashcardsByIndustry = async (c: Context) => {
   try {
-    const industryId = c.req.param("industryId");
-    const language = c.req.query("language");
+    const { industryId } = extractRouteParams(c);
+    const { language } = extractQueryParams(c);
 
     if (!industryId) {
-      return c.json(
-        {
-          success: false,
-          error: "Industry ID is required",
-        },
-        400
-      );
+      return errorResponse(c, "Industry ID is required", 400);
     }
 
-    // Check cache
     const cacheKey = generateCacheKey("industry", { industryId, language });
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
 
-    const flashcards = await prisma.flashcard.findMany({
-      where: {
-        industryId: parseInt(industryId),
-      },
-      include: {
-        industry: true,
-        level: true,
-      },
+    const response = await withCache(cacheKey, async () => {
+      const flashcards = await prisma.flashcard.findMany({
+        where: { industryId: parseInt(industryId) },
+        include: {
+          industry: true,
+          level: true,
+        },
+      });
+
+      if (flashcards.length === 0) {
+        throw new Error("No flashcards found for this industry");
+      }
+
+      const displayFlashcards = flashcards.map((card: FlashcardWithRelations) =>
+        enrichFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: flashcards.length,
+        industry_id: industryId,
+      });
     });
 
-    if (flashcards.length === 0) {
-      return c.json(
-        {
-          success: false,
-          error: "No flashcards found for this industry",
-        },
-        404
-      );
-    }
-
-    const displayFlashcards = flashcards.map(
-      (card: FlashcardWithRelations) => ({
-        ...convertToDisplayFormat(card, language),
-        industry: card.industry.name,
-        level: card.level.name,
-      })
-    );
-
-    const response = {
-      success: true,
-      count: flashcards.length,
-      data: displayFlashcards,
-      industry_id: industryId,
-    };
-
-    // Store in cache
-    responseCache.set(cacheKey, response);
-    console.log(`Cache set: ${cacheKey}`);
-
     return c.json(response);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching flashcards by industry:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch flashcards by industry",
-      },
-      500
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch flashcards by industry",
+      error.message === "No flashcards found for this industry" ? 404 : 500
     );
   }
 };
 
 export const getFlashcards = async (c: Context) => {
   try {
-    const language = c.req.query("language");
-    const industryId = c.req.query("industry_id");
-    const levelId = c.req.query("level_id");
+    const { language, industryId, levelId } = extractQueryParams(c);
+    const cacheKey = generateCacheKey("flashcards", { language, industryId, levelId });
 
-    // Check cache
-    const cacheKey = generateCacheKey("flashcards", {
-      language,
-      industryId,
-      levelId,
+    const response = await withCache(cacheKey, async () => {
+      const whereClause = buildWhereClause({ industryId, levelId });
+
+      const flashcards = await prisma.flashcard.findMany({
+        where: whereClause,
+        include: {
+          industry: true,
+          level: true,
+        },
+      });
+
+      const displayFlashcards = flashcards.map((card: FlashcardWithRelations) =>
+        enrichFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: flashcards.length,
+        filters: { language, industry_id: industryId, level_id: levelId },
+      });
     });
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
-
-    let whereClause: any = {};
-    if (industryId) whereClause.industryId = parseInt(industryId);
-    if (levelId) whereClause.levelId = parseInt(levelId);
-
-    const flashcards = await prisma.flashcard.findMany({
-      where: whereClause,
-      include: {
-        industry: true,
-        level: true,
-      },
-    });
-
-    const displayFlashcards = flashcards.map(
-      (card: FlashcardWithRelations) => ({
-        ...convertToDisplayFormat(card, language),
-        industry: card.industry ? card.industry.name : null,
-        level: card.level.name,
-      })
-    );
-
-    const response = {
-      success: true,
-      count: flashcards.length,
-      data: displayFlashcards,
-      filters: { language, industry_id: industryId, level_id: levelId },
-    };
-
-    // Store in cache
-    responseCache.set(cacheKey, response);
-    console.log(`Cache set: ${cacheKey}`);
 
     return c.json(response);
   } catch (error) {
     console.error("Error fetching flashcards:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch flashcards",
-      },
-      500
-    );
+    return errorResponse(c, "Failed to fetch flashcards");
   }
 };
 
 export const getRandomFlashcard = async (c: Context) => {
   try {
-    const language = c.req.query("language");
-    const industryId = c.req.query("industry_id");
-    const levelId = c.req.query("level_id");
+    const { language, industryId, levelId } = extractQueryParams(c);
 
-    // Ensure cache is loaded
     if (flashcardCache.length === 0) {
       await initializeCache();
-
       if (flashcardCache.length === 0) {
-        return c.json(
-          {
-            success: false,
-            error: "No flashcards available in database",
-          },
-          404
-        );
+        return errorResponse(c, "No flashcards available in database", 404);
       }
     }
 
     let eligibleIds = [...flashcardCache];
 
     if (industryId) {
-      eligibleIds = eligibleIds.filter(
-        (f) => f.industryId === parseInt(industryId)
-      );
+      eligibleIds = eligibleIds.filter((f) => f.industryId === parseInt(industryId));
     }
     if (levelId) {
       eligibleIds = eligibleIds.filter((f) => f.levelId === parseInt(levelId));
     }
 
     if (eligibleIds.length === 0) {
-      return c.json(
-        {
-          success: false,
-          error: "No flashcards found matching the criteria",
-        },
-        404
-      );
+      return errorResponse(c, "No flashcards found matching the criteria", 404);
     }
 
     const randomIndex = Math.floor(Math.random() * eligibleIds.length);
     const selectedCard = eligibleIds[randomIndex];
 
     if (!selectedCard) {
-      return c.json(
-        {
-          success: false,
-          error: "Error selecting random flashcard",
-        },
-        500
-      );
+      return errorResponse(c, "Error selecting random flashcard");
     }
 
-    const randomId = selectedCard.id;
+    const cacheKey = `flashcard:${selectedCard.id}:${language}`;
 
-    // Check if this specific flashcard is cached
-    const cacheKey = `flashcard:${randomId}:${language || "null"}`;
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
+    const response = await withCache(
+      cacheKey,
+      async () => {
+        const randomFlashcard = await prisma.flashcard.findUnique({
+          where: { id: selectedCard.id },
+          include: {
+            industry: true,
+            level: true,
+          },
+        });
 
-    const randomFlashcard = await prisma.flashcard.findUnique({
-      where: { id: randomId },
-      include: {
-        industry: true,
-        level: true,
+        if (!randomFlashcard) {
+          throw new Error("No flashcard found");
+        }
+
+        const displayCard = enrichFlashcard(randomFlashcard, language);
+
+        return successResponse(displayCard, {
+          selectedLanguage: language,
+        });
       },
-    });
-
-    if (!randomFlashcard) {
-      return c.json(
-        {
-          success: false,
-          error: "No flashcard found",
-        },
-        404
-      );
-    }
-
-    const languages = [
-      "french",
-      "chinese",
-      "spanish",
-      "tagalog",
-      "punjabi",
-      "korean",
-    ];
-    const selectedLanguage =
-      language || languages[Math.floor(Math.random() * languages.length)];
-
-    const displayCard = {
-      ...convertToDisplayFormat(randomFlashcard, selectedLanguage),
-      industry: randomFlashcard.industry?.name || null,
-      level: randomFlashcard.level.name,
-    };
-
-    const response = {
-      success: true,
-      data: displayCard,
-      selectedLanguage,
-    };
-
-    // Store in cache (longer TTL for individual flashcards)
-    responseCache.set(cacheKey, response, 600); // 10 minutes
-    console.log(`Cache set: ${cacheKey}`);
+      600
+    );
 
     return c.json(response);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching random flashcard:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch random flashcard",
-      },
-      500
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch random flashcard",
+      error.message === "No flashcard found" ? 404 : 500
+    );
+  }
+};
+
+export const getPracticeTermsByLevel = async (c: Context) => {
+  try {
+    const { levelId } = extractRouteParams(c);
+    const { language, industryId } = extractQueryParams(c);
+
+    if (!levelId) {
+      return errorResponse(c, "Level ID is required", 400);
+    }
+
+    const cacheKey = generateCacheKey("practice-terms", { levelId, language, industryId });
+
+    const response = await withCache(cacheKey, async () => {
+      const parsedLevelId = parseInt(levelId);
+      const parsedIndustryId = industryId ? parseInt(industryId) : null;
+
+      let industryFlashcards: FlashcardWithRelations[] = [];
+      let generalFlashcards: FlashcardWithRelations[] = [];
+
+      if (parsedIndustryId) {
+        industryFlashcards = await prisma.flashcard.findMany({
+          where: {
+            levelId: parsedLevelId,
+            industryId: parsedIndustryId,
+          },
+          include: {
+            industry: true,
+            level: true,
+          },
+        });
+      }
+
+      generalFlashcards = await prisma.flashcard.findMany({
+        where: {
+          levelId: parsedLevelId,
+          industryId: null,
+        },
+        include: {
+          industry: true,
+          level: true,
+        },
+      });
+
+      const combinedFlashcards = combineFlashcardsForPractice(
+        industryFlashcards,
+        generalFlashcards
+      );
+
+      if (combinedFlashcards.length === 0) {
+        throw new Error("No flashcards found for this level");
+      }
+
+      const displayFlashcards = combinedFlashcards.map((card: FlashcardWithRelations) =>
+        enrichFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: displayFlashcards.length,
+        industryCount: industryFlashcards.length,
+        generalCount: Math.min(generalFlashcards.length, 50 - industryFlashcards.length),
+        level_id: levelId,
+        filters: { language, industry_id: industryId },
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching practice terms by level:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch practice terms",
+      error.message === "No flashcards found for this level" ? 404 : 500
     );
   }
 };
 
 export const getIndustries = async (c: Context) => {
   try {
-    // Check cache
     const cacheKey = "industries:all";
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
 
-    const industries = await prisma.industry.findMany({
-      include: {
-        _count: {
-          select: { flashcards: true },
-        },
+    const response = await withCache(
+      cacheKey,
+      async () => {
+        const industries = await prisma.industry.findMany({
+          include: {
+            _count: {
+              select: { flashcards: true },
+            },
+          },
+        });
+
+        return successResponse(industries, { count: industries.length });
       },
-    });
-
-    const response = {
-      success: true,
-      count: industries.length,
-      data: industries,
-    };
-
-    // Store in cache with longer TTL (industries don't change often)
-    responseCache.set(cacheKey, response, 3600); // 1 hour
-    console.log(`Cache set: ${cacheKey}`);
+      3600
+    );
 
     return c.json(response);
   } catch (error) {
     console.error("Error fetching industries:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch industries",
-      },
-      500
-    );
+    return errorResponse(c, "Failed to fetch industries");
   }
 };
 
 export const getLevels = async (c: Context) => {
   try {
-    // Check cache
-    const cacheKey = "levels:all";
-    const cached = responseCache.get(cacheKey);
-    if (cached) {
-      console.log(`Cache hit: ${cacheKey}`);
-      return c.json(cached);
-    }
+    const { levelId } = extractRouteParams(c);
+    const { language, industryId } = extractQueryParams(c);
 
-    const levels = await prisma.level.findMany({
-      include: {
-        _count: {
-          select: { flashcards: true },
-        },
+    const cacheKey = generateCacheKey("levels", { levelId, language, industryId });
+
+    const response = await withCache(
+      cacheKey,
+      async () => {
+        const parsedIndustryId = industryId ? parseInt(industryId) : null;
+        const levelWhere = buildWhereClause({ levelId });
+
+        const levels = await prisma.level.findMany({
+          where: levelWhere,
+          include: {
+            _count: {
+              select: { flashcards: true },
+            },
+          },
+          orderBy: {
+            id: "asc",
+          },
+        });
+
+        if (levels.length === 0) {
+          throw new Error(levelId ? "Level not found" : "No levels found");
+        }
+
+        const levelsWithCounts = await Promise.all(
+          levels.map(async (level: LevelData) => {
+            const counts = await calculateAvailableTerms(prisma, level.id, parsedIndustryId);
+
+            return {
+              ...level,
+              available_terms: counts.totalAvailable,
+              industry_terms: counts.industryCount,
+              general_terms: counts.generalCount,
+              total_general_terms: counts.totalGeneralCount,
+            };
+          })
+        );
+
+        return successResponse(levelId ? levelsWithCounts[0] : levelsWithCounts, {
+          count: levelsWithCounts.length,
+          filters: { language, industry_id: industryId },
+        });
       },
-    });
-
-    const response = {
-      success: true,
-      count: levels.length,
-      data: levels,
-    };
-
-    // Store in cache with longer TTL (levels don't change often)
-    responseCache.set(cacheKey, response, 3600); // 1 hour
-    console.log(`Cache set: ${cacheKey}`);
+      3600
+    );
 
     return c.json(response);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching levels:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to fetch levels",
-      },
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch levels",
+      error.message?.includes("not found") ? 404 : 500
+    );
+  }
+};
+
+
+export const getCustomFlashcardsByDocument = async (c: Context) => {
+  try {
+    const documentId = c.req.param("documentId");
+    const { language } = extractQueryParams(c);
+
+    if (!documentId) {
+      return errorResponse(c, "Document ID is required", 400);
+    }
+
+    const cacheKey = generateCacheKey("custom-document", { documentId, language });
+
+    const response = await withCache(cacheKey, async () => {
+      const flashcards = await prisma.customFlashcard.findMany({
+        where: { documentId },
+        include: {
+          document: true,
+        },
+      });
+
+      if (flashcards.length === 0) {
+        throw new Error("No flashcards found for this document");
+      }
+
+      const displayFlashcards = flashcards.map((card: any) =>
+        enrichCustomFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: flashcards.length,
+        document_id: documentId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom flashcards by document:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch custom flashcards",
+      error.message === "No flashcards found for this document" ? 404 : 500
+    );
+  }
+};
+
+
+export const getCustomFlashcardsByUser = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    
+    if (!user || !user.id) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+    
+    const userId = user.id;
+    const { language } = extractQueryParams(c);
+
+    console.log("Fetching custom flashcards for user:", userId);
+
+    const cacheKey = generateCacheKey("custom-user", { userId, language });
+
+    const response = await withCache(cacheKey, async () => {
+      const flashcards = await prisma.customFlashcard.findMany({
+        where: { userId },
+        include: {
+          document: true,
+        },
+      });
+
+      console.log(`Found ${flashcards.length} custom flashcards for user ${userId}`);
+
+      // Return empty array if no flashcards found - this is not an error
+      const displayFlashcards = flashcards.map((card: any) =>
+        enrichCustomFlashcard(card, language)
+      );
+
+      return successResponse(displayFlashcards, {
+        count: flashcards.length,
+        user_id: userId,
+      });
+    });
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching custom flashcards by user:", error);
+    console.error("Error stack:", error.stack);
+    return errorResponse(
+      c, 
+      error.message || "Failed to fetch custom flashcards",
       500
     );
   }
 };
 
-// Optional: Add cache management endpoints
+export const getRandomCustomFlashcard = async (c: Context) => {
+  try {
+    const userId = c.req.param("userId");
+    const { language } = extractQueryParams(c);
+    const documentId = c.req.query("document_id");
+
+    if (!userId) {
+      return errorResponse(c, "User ID is required", 400);
+    }
+
+    const whereClause = buildWhereClause({ userId, documentId });
+
+    const flashcards = await prisma.customFlashcard.findMany({
+      where: whereClause,
+      include: {
+        document: true,
+      },
+    });
+
+    if (flashcards.length === 0) {
+      return errorResponse(c, "No custom flashcards found", 404);
+    }
+
+    const randomIndex = Math.floor(Math.random() * flashcards.length);
+    const randomFlashcard = flashcards[randomIndex];
+
+    const displayCard = enrichCustomFlashcard(randomFlashcard, language);
+
+    const response = successResponse(displayCard, {
+      selectedLanguage: language,
+    });
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching random custom flashcard:", error);
+    return errorResponse(c, "Failed to fetch random custom flashcard");
+  }
+};
+
+// Cache management controllers
+
 export const clearCache = async (c: Context) => {
   try {
-    responseCache.flushAll();
+    clearAllCache();
     return c.json({
       success: true,
       message: "Cache cleared successfully",
     });
   } catch (error) {
     console.error("Error clearing cache:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to clear cache",
-      },
-      500
-    );
+    return errorResponse(c, "Failed to clear cache");
   }
 };
 
 export const getCacheStats = async (c: Context) => {
   try {
-    const stats = responseCache.getStats();
+    const stats = getCacheStatistics();
     return c.json({
       success: true,
-      stats: {
-        keys: stats.keys,
-        hits: stats.hits,
-        misses: stats.misses,
-        hitRate: stats.hits / (stats.hits + stats.misses) || 0,
-      },
+      stats,
     });
   } catch (error) {
     console.error("Error getting cache stats:", error);
-    return c.json(
-      {
-        success: false,
-        error: "Failed to get cache stats",
-      },
-      500
-    );
+    return errorResponse(c, "Failed to get cache stats");
   }
 };

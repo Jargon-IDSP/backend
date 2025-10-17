@@ -49,7 +49,6 @@ function loadAllFlashcardsFromDirectory(baseDir: string): flashcardJson[] {
         .sort()
       
       for (const file of files) {
-        // Only load files that contain words (not questions)
         if (file.includes('words') || file.includes('word')) {
           const filePath = path.join(folderPath, file)
           const fileData = loadJsonFile<flashcardJson>(filePath, `${folder.name}/${file}`)
@@ -101,7 +100,6 @@ async function importData() {
     
     console.log(`Loaded ${levelsData.length} levels, ${industriesData.length} industries, ${flashcardsData.length} flashcards\n`)
 
-    // Validate data
     const missingLevelId = flashcardsData.filter(card => !card.level_id)
     if (missingLevelId.length > 0) {
       console.error(`Found ${missingLevelId.length} flashcards missing level_id:`)
