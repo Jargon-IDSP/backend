@@ -7,10 +7,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../config/s3";
 import { prisma } from "../lib/prisma";
-import axios from "axios";
-import fs from "fs";
-import path from "path";
-import os from "os";
+import { getGoogleAccessToken } from "../lib/OCRData";
 
 export const getUploadUrl = async (c: Context) => {
   try {
@@ -40,7 +37,7 @@ export const getUploadUrl = async (c: Context) => {
 
 export const saveDocument = async (c: Context) => {
   try {
-    const { fileKey, filename, fileType, fileSize } = await c.req.json();
+    const { fileKey, filename, fileType, fileSize, extractedText } = await c.req.json();
 
     const user = c.get("user");
     if (!user) {
@@ -54,6 +51,8 @@ export const saveDocument = async (c: Context) => {
         fileUrl: fileKey,
         fileType,
         fileSize: fileSize || null,
+        extractedText: extractedText || null,
+        ocrProcessed: extractedText ? true : false,
         userId: user.id,
       },
     });
@@ -207,27 +206,23 @@ export const triggerOCR = async (c: Context) => {
       return c.json({ error: "Forbidden" }, 403);
     }
 
-    console.log("=== Starting OCR Processing ===");
+    console.log("=== Starting Google Document AI OCR ===");
     console.log("Document ID:", document.id);
     console.log("Filename:", document.filename);
     console.log("File Type:", document.fileType);
 
-    const apiKey = process.env.NANONETS_API_KEY;
-    const modelId = process.env.NANONETS_MODEL_ID;
-
-    if (!apiKey || !modelId) {
-      throw new Error("Nanonets API credentials not configured");
+    // Only process PDFs
+    if (document.fileType !== "application/pdf") {
+      return c.json({ error: "Only PDF files can be processed" }, 400);
     }
 
-    console.log("Uploading to Nanonets API...");
-    console.log("Model ID:", modelId);
-
+    // Download file from Cloudflare R2
+    console.log("Downloading file from R2...");
     const getCommand = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET!,
       Key: document.fileKey,
     });
 
-    console.log("Downloading file from R2...");
     const s3Response = await s3.send(getCommand);
 
     const chunks: Uint8Array[] = [];
@@ -237,138 +232,75 @@ export const triggerOCR = async (c: Context) => {
     const fileBuffer = Buffer.concat(chunks);
     console.log("File downloaded, size:", fileBuffer.length, "bytes");
 
-    const tempDir = os.tmpdir();
-    const tempFilePath = path.join(
-      tempDir,
-      `nanonets-${Date.now()}-${document.filename}`
-    );
+    // Convert to base64
+    const base64Content = fileBuffer.toString("base64");
 
-    console.log("Writing to temp file:", tempFilePath);
-    fs.writeFileSync(tempFilePath, fileBuffer);
-    console.log("Temp file written successfully");
+    // Get Google access token and process with Document AI
+    console.log("Getting Google access token...");
+    const accessToken = await getGoogleAccessToken();
 
-    let ocrResult;
-    try {
-      const FormData = (await import("form-data")).default;
-      const formData = new FormData();
+    console.log("Processing with Google Document AI...");
+    const { getGoogleCloudConfig } = await import("../lib/OCRData");
+    const config = getGoogleCloudConfig();
+    const { projectId, location, processorId } = config;
 
-      formData.append("file", fs.createReadStream(tempFilePath), {
-        filename: document.filename,
-        contentType: document.fileType || "application/octet-stream",
+    if (!projectId || !processorId) {
+      throw new Error("Missing GCP_PROJECT_ID or PROCESSOR_ID in environment");
+    }
+
+    const endpoint = `https://${location}-documentai.googleapis.com/v1/projects/${projectId}/locations/${location}/processors/${processorId}:process`;
+
+    const requestBody = {
+      rawDocument: {
+        content: base64Content,
+        mimeType: "application/pdf",
+      },
+      skipHumanReview: true,
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Document AI error: ${error}`);
+    }
+
+    const result: any = await response.json();
+
+    // Parse the response
+    const doc = result.document;
+    if (!doc) {
+      throw new Error("Invalid response from Document AI");
+    }
+
+    const extractedText = doc.text || "";
+    const pagesCount = doc.pages?.length || 0;
+
+    console.log("Document AI Response:", {
+      textLength: extractedText.length,
+      pagesCount,
+    });
+
+    // Extract pages info
+    const pages: Array<{ pageNumber: number; text: string }> = [];
+    if (doc.pages) {
+      doc.pages.forEach((page: any, index: number) => {
+        const pageText = extractPageText(extractedText, page);
+        pages.push({
+          pageNumber: index + 1,
+          text: pageText,
+        });
       });
-
-      console.log("FormData created with file stream, making API call...");
-
-      const nanoResponse = await axios.post(
-        `https://app.nanonets.com/api/v2/OCR/Model/${modelId}/LabelFile/`,
-        formData,
-        {
-          headers: {
-            Authorization: `Basic ${Buffer.from(apiKey + ":").toString(
-              "base64"
-            )}`,
-            ...formData.getHeaders(),
-          },
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          timeout: 120000, 
-        }
-      );
-
-      console.log("Nanonets Response Status:", nanoResponse.status);
-      console.log("Sync processing complete");
-
-      ocrResult = nanoResponse.data;
-      console.log(
-        "OCR Result received from Nanonets:",
-        JSON.stringify(ocrResult, null, 2)
-      );
-    } catch (uploadError) {
-      console.error("Upload to Nanonets failed:", uploadError);
-      throw uploadError;
-    } finally {
-      try {
-        if (fs.existsSync(tempFilePath)) {
-          fs.unlinkSync(tempFilePath);
-          console.log("Temp file deleted");
-        }
-      } catch (unlinkError) {
-        console.error("Failed to delete temp file:", unlinkError);
-      }
     }
 
-    let extractedText = "";
-    let terms: Array<{ term: string; definition: string }> = [];
-    let allTextSegments: string[] = [];
-
-    if (ocrResult.result && ocrResult.result.length > 0) {
-      console.log(
-        `Processing ${ocrResult.result.length} pages from OCR result`
-      );
-
-      for (const pageResult of ocrResult.result) {
-        const prediction = pageResult.prediction;
-        const pageNumber = pageResult.page;
-
-        if (Array.isArray(prediction)) {
-          if (prediction.length > 0) {
-            console.log(
-              `Page ${pageNumber}: Found ${prediction.length} predictions`
-            );
-
-            const pageText = prediction
-              .map((pred: any) => pred.ocr_text || "")
-              .filter((text: string) => text.trim())
-              .join("\n");
-
-            if (pageText.trim()) {
-              allTextSegments.push(
-                `\n=== Page ${pageNumber + 1} ===\n${pageText}`
-              );
-            }
-
-            for (let i = 0; i < prediction.length; i++) {
-              const pred = prediction[i];
-              if (
-                pred.label === "term" &&
-                prediction[i + 1]?.label === "definition"
-              ) {
-                terms.push({
-                  term: pred.ocr_text,
-                  definition: prediction[i + 1].ocr_text,
-                });
-                console.log(
-                  `Found term-definition pair on page ${pageNumber}: ${pred.ocr_text}`
-                );
-              }
-            }
-          } else {
-            console.log(
-              `Page ${pageNumber}: Empty predictions array - may be a blank page or OCR failed`
-            );
-            allTextSegments.push(
-              `\n=== Page ${
-                pageNumber + 1
-              } ===\n[No text detected on this page]`
-            );
-          }
-        } else {
-          console.log(`Page ${pageNumber}: No predictions array found`);
-        }
-      }
-
-      extractedText = allTextSegments.join("\n");
-
-      console.log("Total extracted text length:", extractedText.length);
-      console.log("Total term-definition pairs found:", terms.length);
-      console.log("Pages processed:", ocrResult.result.length);
-      if (extractedText.length > 0) {
-        console.log("Text preview:", extractedText.substring(0, 300));
-      }
-    } else {
-      console.warn("No OCR results found in Nanonets response");
-    }
-
+    // Update document with extracted text
     const updatedDocument = await prisma.document.update({
       where: { id },
       data: {
@@ -378,37 +310,9 @@ export const triggerOCR = async (c: Context) => {
     });
 
     console.log("Document updated with OCR results");
-
-    let flashcardsCreated = 0;
-    if (terms && terms.length > 0) {
-      const flashcards = await Promise.all(
-        terms.map((item) =>
-          prisma.customFlashcard.create({
-            data: {
-              documentId: document.id,
-              userId: user.id,
-              termEnglish: item.term,
-              definitionEnglish: item.definition,
-              termFrench: "",
-              termChinese: "",
-              termSpanish: "",
-              termTagalog: "",
-              termPunjabi: "",
-              termKorean: "",
-              definitionFrench: "",
-              definitionChinese: "",
-              definitionSpanish: "",
-              definitionTagalog: "",
-              definitionPunjabi: "",
-              definitionKorean: "",
-            },
-          })
-        )
-      );
-
-      flashcardsCreated = flashcards.length;
-      console.log("Created flashcards:", flashcardsCreated);
-    }
+    console.log("Total extracted text length:", extractedText.length);
+    console.log("Pages processed:", pagesCount);
+    console.log("Text preview:", extractedText.substring(0, 200));
 
     console.log("=== OCR Processing Complete ===");
 
@@ -418,24 +322,11 @@ export const triggerOCR = async (c: Context) => {
         extractedText.substring(0, 500) +
         (extractedText.length > 500 ? "..." : ""),
       textLength: extractedText.length,
-      flashcardsCreated: flashcardsCreated,
+      pagesCount: pagesCount,
       document: updatedDocument,
     });
   } catch (error) {
     console.error("=== OCR Processing Error ===");
-
-    if (axios.isAxiosError(error) && error.response) {
-      console.error("Nanonets Error Response:", error.response.data);
-      return c.json(
-        {
-          error: `Nanonets API failed (${
-            error.response.status
-          }): ${JSON.stringify(error.response.data)}`,
-        },
-        500
-      );
-    }
-
     console.error(error);
     return c.json(
       {
@@ -445,3 +336,24 @@ export const triggerOCR = async (c: Context) => {
     );
   }
 };
+
+// Helper function to extract text from a page
+function extractPageText(fullText: string, page: any): string {
+  if (!page.layout || !page.layout.textAnchor) {
+    return "";
+  }
+
+  const textAnchor = page.layout.textAnchor;
+  if (!textAnchor.textSegments) {
+    return "";
+  }
+
+  let pageText = "";
+  textAnchor.textSegments.forEach((segment: any) => {
+    const startIndex = parseInt(segment.startIndex || "0");
+    const endIndex = parseInt(segment.endIndex || fullText.length);
+    pageText += fullText.substring(startIndex, endIndex);
+  });
+
+  return pageText;
+}

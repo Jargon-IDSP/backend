@@ -10,6 +10,7 @@ import { documentRoute } from "./routes/documentRoute";
 import webhookRoute from "./routes/webhookRoute";
 import { leaderboardRoute } from "./routes/leaderboardRoute";
 import { learningRoute } from "./routes/learningRoute";
+import { ocrRoute } from "./routes/ocrRoute";
 
 export const app = new Hono();
 
@@ -36,6 +37,8 @@ app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
 app.route("/leaderboard", leaderboardRoute);
 app.route("/learning", learningRoute); 
+app.route("/ocr", ocrRoute);
+
 
 app.post("/test-nanonets-url", async (c) => {
   try {
