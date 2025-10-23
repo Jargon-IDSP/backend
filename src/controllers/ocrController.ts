@@ -2,40 +2,40 @@ import type { Context } from 'hono';
 import { getGoogleAccessToken, getGoogleCloudConfig } from '../lib/OCRData';
 import type { OCRPage, OCRResult } from '../interfaces/OCRInterfaces';
 
+const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+const MaxFileSize = 20 * 1024 * 1024;
 
 export async function processDocument(c: Context): Promise<Response> {
   try {
     const body = await c.req.parseBody();
-    const pdfFile = body.pdf as File;
+    const file = body.file || body.pdf as File;
 
-    if (!pdfFile) {
+    if (!file || typeof file === 'string') {
       return c.json<OCRResult>(
-        { success: false, error: 'No PDF file provided' },
+        { success: false, error: 'No file provided' },
         400
       );
     }
 
-    if (pdfFile.type !== 'application/pdf') {
+    if (!AllowedFileTypes.includes(file.type)) {
       return c.json<OCRResult>(
-        { success: false, error: 'Only PDF files are allowed' },
+        { success: false, error: 'Only PDF, JPG, and PNG files are allowed' },
         400
       );
     }
 
-    if (pdfFile.size > 20 * 1024 * 1024) {
+    if (file.size > MaxFileSize) {
       return c.json<OCRResult>(
         { success: false, error: 'File size must be less than 20MB' },
         400
       );
     }
 
-    console.log(`Processing PDF: ${pdfFile.name}, Size: ${pdfFile.size} bytes`);
-
-    const arrayBuffer = await pdfFile.arrayBuffer();
+    const arrayBuffer = await file.arrayBuffer();
     const base64Content = Buffer.from(arrayBuffer).toString('base64');
 
     const accessToken = await getGoogleAccessToken();
-    const result = await callDocumentAI(base64Content, accessToken);
+    const result = await callDocumentAI(base64Content, accessToken, file.type);
 
     return c.json<OCRResult>({
       success: true,
@@ -57,13 +57,13 @@ export async function processBatchDocuments(c: Context): Promise<Response> {
     const files: File[] = [];
     
     for (const [key, value] of formData.entries()) {
-      if (key === 'pdfs' && value instanceof File) {
+      if ((key === 'files' || key === 'pdfs') && value instanceof File) {
         files.push(value);
       }
     }
 
     if (files.length === 0) {
-      return c.json({ success: false, error: 'No PDF files provided' }, 400);
+      return c.json({ success: false, error: 'No files provided' }, 400);
     }
 
     const accessToken = await getGoogleAccessToken();
@@ -71,18 +71,26 @@ export async function processBatchDocuments(c: Context): Promise<Response> {
 
     for (const file of files) {
       try {
-        if (file.type !== 'application/pdf') {
+        if (!AllowedFileTypes.includes(file.type)) {
           results.push({
             filename: file.name,
             success: false,
-            error: 'Only PDF files are allowed',
+            error: 'Only PDF, JPG, and PNG files are allowed',
           });
           continue;
         }
-
+        
+        if (file.size > MaxFileSize) {
+          results.push({
+            filename: file.name,
+            success: false,
+            error: 'File size must be less than 20MB',
+          });
+          continue;
+        }
         const arrayBuffer = await file.arrayBuffer();
         const base64Content = Buffer.from(arrayBuffer).toString('base64');
-        const result = await callDocumentAI(base64Content, accessToken);
+        const result = await callDocumentAI(base64Content, accessToken, file.type);
 
         results.push({
           filename: file.name,
@@ -110,7 +118,7 @@ export async function processBatchDocuments(c: Context): Promise<Response> {
 
 export async function processDocumentFromGCS(c: Context): Promise<Response> {
   try {
-    const { gcsUri } = await c.req.json();
+    const { gcsUri, mimeType } = await c.req.json();
 
     if (!gcsUri) {
       return c.json<OCRResult>(
@@ -119,10 +127,19 @@ export async function processDocumentFromGCS(c: Context): Promise<Response> {
       );
     }
 
+    const fileMimeType = mimeType || 'application/pdf';
+
+    if (!AllowedFileTypes.includes(fileMimeType)) {
+      return c.json<OCRResult>(
+        { success: false, error: 'Only PDF, JPG, and PNG files are allowed' },
+        400
+      );
+    }
+
     console.log(`Processing PDF from GCS: ${gcsUri}`);
 
     const accessToken = await getGoogleAccessToken();
-    const result = await callDocumentAIFromGCS(gcsUri, accessToken);
+    const result = await callDocumentAIFromGCS(gcsUri, accessToken, fileMimeType);
 
     return c.json<OCRResult>({
       success: true,
@@ -140,7 +157,9 @@ export async function processDocumentFromGCS(c: Context): Promise<Response> {
 
 export async function callDocumentAI(
   base64Content: string,
-  accessToken: string
+  accessToken: string,
+    mimeType: string
+
 ): Promise<Omit<OCRResult, 'success'>> {
   const config = getGoogleCloudConfig();
   const { projectId, location, processorId } = config;
@@ -154,7 +173,7 @@ export async function callDocumentAI(
   const requestBody = {
     rawDocument: {
       content: base64Content,
-      mimeType: 'application/pdf',
+      mimeType: mimeType,
     },
   };
 
@@ -179,7 +198,8 @@ export async function callDocumentAI(
 
 async function callDocumentAIFromGCS(
   gcsUri: string,
-  accessToken: string
+  accessToken: string,
+  mimeType: string
 ): Promise<Omit<OCRResult, 'success'>> {
   const config = getGoogleCloudConfig();
   const { projectId, location, processorId } = config;
@@ -193,7 +213,7 @@ async function callDocumentAIFromGCS(
   const requestBody = {
     gcsDocument: {
       gcsUri: gcsUri,
-      mimeType: 'application/pdf',
+      mimeType: mimeType,
     },
   };
 

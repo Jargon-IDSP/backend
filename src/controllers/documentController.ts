@@ -211,12 +211,12 @@ export const triggerOCR = async (c: Context) => {
     console.log("Filename:", document.filename);
     console.log("File Type:", document.fileType);
 
-    // Only process PDFs
-    if (document.fileType !== "application/pdf") {
-      return c.json({ error: "Only PDF files can be processed" }, 400);
+    const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+
+    if (!AllowedFileTypes.includes(document.fileType)) {
+      return c.json({ error: "Only PDF, JPG, and PNG files can be processed" }, 400);
     }
 
-    // Download file from Cloudflare R2
     console.log("Downloading file from R2...");
     const getCommand = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET!,
@@ -232,10 +232,8 @@ export const triggerOCR = async (c: Context) => {
     const fileBuffer = Buffer.concat(chunks);
     console.log("File downloaded, size:", fileBuffer.length, "bytes");
 
-    // Convert to base64
     const base64Content = fileBuffer.toString("base64");
 
-    // Get Google access token and process with Document AI
     console.log("Getting Google access token...");
     const accessToken = await getGoogleAccessToken();
 
@@ -253,7 +251,7 @@ export const triggerOCR = async (c: Context) => {
     const requestBody = {
       rawDocument: {
         content: base64Content,
-        mimeType: "application/pdf",
+        mimeType: document.fileType,
       },
       skipHumanReview: true,
     };
@@ -262,7 +260,7 @@ export const triggerOCR = async (c: Context) => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+        "Content-Type": document.fileType,
       },
       body: JSON.stringify(requestBody),
     });
@@ -274,7 +272,6 @@ export const triggerOCR = async (c: Context) => {
 
     const result: any = await response.json();
 
-    // Parse the response
     const doc = result.document;
     if (!doc) {
       throw new Error("Invalid response from Document AI");
@@ -288,7 +285,6 @@ export const triggerOCR = async (c: Context) => {
       pagesCount,
     });
 
-    // Extract pages info
     const pages: Array<{ pageNumber: number; text: string }> = [];
     if (doc.pages) {
       doc.pages.forEach((page: any, index: number) => {
@@ -300,7 +296,6 @@ export const triggerOCR = async (c: Context) => {
       });
     }
 
-    // Update document with extracted text
     const updatedDocument = await prisma.document.update({
       where: { id },
       data: {
@@ -337,7 +332,6 @@ export const triggerOCR = async (c: Context) => {
   }
 };
 
-// Helper function to extract text from a page
 function extractPageText(fullText: string, page: any): string {
   if (!page.layout || !page.layout.textAnchor) {
     return "";
