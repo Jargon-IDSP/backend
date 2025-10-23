@@ -57,6 +57,14 @@ export const saveDocument = async (c: Context) => {
       },
     });
 
+    const ocrSupportedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (ocrSupportedTypes.includes(fileType) && !extractedText) {
+      console.log(`Triggering auto OCR for ${filename}`);
+      autoTriggerOCR(document.id, user.id).catch(err => 
+        console.error('Background OCR error:', err)
+      );
+    }
+
     return c.json({ document });
   } catch (error) {
     console.error("Save document error:", error);
@@ -184,6 +192,90 @@ export const deleteDocument = async (c: Context) => {
     return c.json({ error: String(error) }, 500);
   }
 };
+
+async function autoTriggerOCR(documentId: string, userId: string) {
+  try {
+    console.log(`[Auto OCR] Starting for document ${documentId}`);
+    
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+    });
+
+    if (!document || document.userId !== userId) {
+      console.error(`[Auto OCR] Document ${documentId} not found or unauthorized`);
+      return;
+    }
+
+    const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!AllowedFileTypes.includes(document.fileType)) {
+      console.log(`[Auto OCR] File type ${document.fileType} not supported`);
+      return;
+    }
+
+    const getCommand = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET!,
+      Key: document.fileKey,
+    });
+
+    const s3Response = await s3.send(getCommand);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of s3Response.Body as any) {
+      chunks.push(chunk);
+    }
+    const fileBuffer = Buffer.concat(chunks);
+    const base64Content = fileBuffer.toString("base64");
+
+    const accessToken = await getGoogleAccessToken();
+    const { getGoogleCloudConfig } = await import("../lib/OCRData");
+    const config = getGoogleCloudConfig();
+    const { projectId, location, processorId } = config;
+
+    if (!projectId || !processorId) {
+      throw new Error("Missing GCP_PROJECT_ID or PROCESSOR_ID");
+    }
+
+    const endpoint = `https://${location}-documentai.googleapis.com/v1/projects/${projectId}/locations/${location}/processors/${processorId}:process`;
+
+    const requestBody = {
+      rawDocument: {
+        content: base64Content,
+        mimeType: document.fileType,
+      },
+      skipHumanReview: true,
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Document AI error: ${error}`);
+    }
+
+    const result: any = await response.json();
+    const doc = result.document;
+    
+    if (doc) {
+      const extractedText = doc.text || "";
+      await prisma.document.update({
+        where: { id: documentId },
+        data: {
+          extractedText: extractedText,
+          ocrProcessed: true,
+        },
+      });
+      console.log(`[Auto OCR] Completed for ${document.filename}, extracted ${extractedText.length} characters`);
+    }
+  } catch (error) {
+    console.error(`[Auto OCR] Failed for ${documentId}:`, error);
+  }
+}
 
 export const triggerOCR = async (c: Context) => {
   try {
