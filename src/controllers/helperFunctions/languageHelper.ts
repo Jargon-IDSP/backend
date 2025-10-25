@@ -1,5 +1,5 @@
-import type { Langs } from "../interfaces/customFlashcard";
-import { prisma } from "../lib/prisma";
+import type { Langs } from "../../interfaces/customFlashcard";
+import { prisma } from "../../lib/prisma";
 
 // ============================================
 // USER LANGUAGE UTILITIES

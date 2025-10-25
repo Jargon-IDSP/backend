@@ -10,6 +10,8 @@ import webhookRoute from "./routes/webhookRoute";
 import { leaderboardRoute } from "./routes/leaderboardRoute";
 import { learningRoute } from "./routes/learningRoute";
 import { ocrRoute } from "./routes/ocrRoute";
+import quizRoute from "./routes/quizRoute";
+import friendshipRoute from "./routes/friendshipRoute";
 
 export const app = new Hono();
 
@@ -37,6 +39,8 @@ app.route("/webhooks", webhookRoute);
 app.route("/leaderboard", leaderboardRoute);
 app.route("/learning", learningRoute); 
 app.route("/ocr", ocrRoute);
+app.route("/quiz", quizRoute);
+app.route("/friendships", friendshipRoute);
 
 
 await initializeCache();

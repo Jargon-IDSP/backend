@@ -15,7 +15,8 @@ export function getCurrentWeekStart(): Date {
 
 export function getDayAbbreviation(date: Date = new Date()): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  return days[date.getUTCDay()];
+  const day = days[date.getUTCDay()];
+  return day ?? 'Sun';
 }
 
 export async function getCurrentWeekStats(userId: string): Promise<UserWeeklyStats> {
@@ -219,8 +220,10 @@ export async function getWeeklyStatistics() {
   };
   
   stats.forEach(s => {
-    const count = s.daysActive ? s.daysActive.split(',').filter(d => d).length : 0;
-    daysActiveDistribution[count]++;
+    const count = s.daysActive ? s.daysActive.split(',').filter((d: string) => d).length : 0;
+    if (daysActiveDistribution[count] !== undefined) {
+      daysActiveDistribution[count]++;
+    }
   });
 
   return {
@@ -238,5 +241,155 @@ export async function trackUserActivity(userId: string): Promise<void> {
     await markDayActive(userId);
   } catch (error) {
     console.error('Failed to track user activity:', error);
+  }
+}
+
+// Route Handlers (Context-based)
+import type { Context } from 'hono';
+
+export async function getCurrentWeeklyStats(c: Context) {
+  try {
+    const userId = c.get('userId');
+    
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const stats = await getCurrentWeekStats(userId);
+    const rank = await getUserWeeklyRank(userId);
+    const activeDays = stats.daysActive ? stats.daysActive.split(',').filter((d: string) => d) : [];
+
+    return c.json({
+      success: true,
+      data: {
+        weeklyScore: stats.weeklyScore,
+        daysActive: activeDays,
+        daysActiveCount: activeDays.length,
+        rank,
+        weekStartDate: stats.weekStartDate,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching weekly stats:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch weekly stats',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getLeaderboard(c: Context) {
+  try {
+    const limit = parseInt(c.req.query('limit') || '10');
+    const leaderboard = await getWeeklyLeaderboard(limit);
+
+    return c.json({
+      success: true,
+      data: leaderboard,
+    });
+  } catch (error) {
+    console.error('Error fetching weekly leaderboard:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch weekly leaderboard',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getWeeklyHistory(c: Context) {
+  try {
+    const userId = c.get('userId');
+    
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const weeksBack = parseInt(c.req.query('weeks') || '4');
+    const history = await getUserWeeklyHistory(userId, weeksBack);
+
+    return c.json({
+      success: true,
+      data: history.map(h => ({
+        weekStartDate: h.weekStartDate,
+        weeklyScore: h.weeklyScore,
+        daysActive: h.daysActive ? h.daysActive.split(',').filter((d: string) => d) : [],
+        daysActiveCount: h.daysActive ? h.daysActive.split(',').filter((d: string) => d).length : 0,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching weekly history:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch weekly history',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getStatistics(c: Context) {
+  try {
+    const statistics = await getWeeklyStatistics();
+
+    return c.json({
+      success: true,
+      data: statistics,
+    });
+  } catch (error) {
+    console.error('Error fetching weekly statistics:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch weekly statistics',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getFriendsWeeklyStats(c: Context) {
+  try {
+    const userId = c.get('userId');
+    
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        OR: [
+          { requesterId: userId, status: 'ACCEPTED' },
+          { addresseeId: userId, status: 'ACCEPTED' },
+        ],
+      },
+      select: {
+        requesterId: true,
+        addresseeId: true,
+      },
+    });
+
+    const friendIds = friendships.map(f => 
+      f.requesterId === userId ? f.addresseeId : f.requesterId
+    );
+
+    const userIds = [userId, ...friendIds];
+    const stats = await getWeeklyStatsForUsers(userIds);
+
+    return c.json({
+      success: true,
+      data: stats.map(s => ({
+        userId: s.userId,
+        username: s.user.username || `${s.user.firstName} ${s.user.lastName}`,
+        weeklyScore: s.weeklyScore,
+        daysActive: s.daysActive ? s.daysActive.split(',').filter((d: string) => d) : [],
+        daysActiveCount: s.daysActive ? s.daysActive.split(',').filter((d: string) => d).length : 0,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching friends weekly stats:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch friends weekly stats',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
   }
 }
