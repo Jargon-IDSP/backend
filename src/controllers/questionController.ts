@@ -21,7 +21,7 @@ import {
   successResponse,
 } from "./helperFunctions/responseHelper";
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // Existing Questions
 

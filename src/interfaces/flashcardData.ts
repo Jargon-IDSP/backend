@@ -1,4 +1,6 @@
 import type { Flashcard, Industry, Level } from '@prisma/client'
+import type { QuizCategory } from './customFlashcard';
+import type { Langs } from './customFlashcard';
 
 export interface flashcardJson {
   id: string
@@ -122,10 +124,33 @@ export type DocumentWithFullFlashcards = Document & {
 export type Language = 'french' | 'chinese' | 'spanish' | 'tagalog' | 'punjabi' | 'korean'
 
 export type FlashcardWithRelations = Flashcard & {
-  industry: Industry
+  industry: Industry | null
   level: Level
 }
 
 export type CustomFlashcardWithRelations = CustomFlashcard & {
-  document: Document
+  document: Document | null
+}
+
+export interface CustomFlashcardFilters {
+  userId?: string;
+  documentId?: string;
+  customQuizId?: string;
+  category?: QuizCategory;
+  language?: Langs;
+  searchTerm?: string;
+  sortBy?: 'createdAt' | 'termEnglish';
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
+export interface FlashcardFilters {
+  levelId?: number;
+  industryId?: number;
+  language?: Langs;
+  sortBy?: 'termEnglish' | 'levelId';
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
 }

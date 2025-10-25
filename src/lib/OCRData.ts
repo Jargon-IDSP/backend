@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { OCRData } from '../interfaces/OCRInterfaces';
+import type { OCRData } from '../interfaces/documentInterfaces';
 
 
 export async function getGoogleAccessToken(): Promise<string> {

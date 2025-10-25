@@ -2,7 +2,7 @@ import { verifyToken, createClerkClient } from "@clerk/backend";
 import type { Context, Next } from "hono";
 import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 declare module "hono" {
   interface ContextVariableMap {

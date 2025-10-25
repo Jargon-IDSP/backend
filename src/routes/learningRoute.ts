@@ -27,7 +27,7 @@ import {
   generateCustomQuiz,
 } from "../controllers/questionController";
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export const learningRoute = new Hono()
   .use("*", authMiddleware)
