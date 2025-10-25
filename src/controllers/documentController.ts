@@ -8,6 +8,167 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 
+// ============================================================================
+// HELPER FUNCTIONS FOR DOCUMENT PROCESSING
+// ============================================================================
+
+// SYNCHRONOUS: Extract text with OCR only (wait for completion)
+async function extractTextWithOCR(documentId: string, userId: string): Promise<string | null> {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`� EXTRACTING TEXT: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { performOCR } = await import("./helperFunctions/documentHelper");
+    
+    const extractedText = await performOCR(documentId, userId);
+    
+    if (!extractedText) {
+      console.log('❌ No text extracted');
+      return null;
+    }
+    
+    console.log(`✅ Extracted ${extractedText.length} characters\n`);
+    
+    return extractedText;
+    
+  } catch (error) {
+    console.error(`❌ OCR extraction failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    throw error;
+  }
+}
+
+// ASYNCHRONOUS: Translate document in background
+async function translateDocument(documentId: string, userId: string, extractedText: string) {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🌐 TRANSLATING DOCUMENT: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { translateFullDocument } = await import("./helperFunctions/documentHelper");
+    
+    // Translate to all languages
+    console.log('🌐 Translating to all languages...');
+    const translationData = await translateFullDocument(extractedText, documentId, userId);
+    await prisma.documentTranslation.create({ data: translationData });
+    console.log('✅ Translation complete\n');
+    
+    console.log(`${'='.repeat(60)}`);
+    console.log(`✨ TRANSLATION COMPLETE FOR ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+  } catch (error) {
+    console.error(`❌ Translation failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    throw error;
+  }
+}
+
+// ASYNCHRONOUS: Generate flashcards and questions in background
+async function generateFlashcardsAndQuestions(documentId: string, userId: string) {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🎴 ASYNC FLASHCARD GENERATION: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { 
+      getExistingTerms,
+      createQuizData,
+      transformToFlashcardData,
+      transformToQuestionData,
+      createIndexToIdMap 
+    } = await import("./helperFunctions/documentHelper");
+    
+    const { generateCustomFromOCR } = await import("./helperFunctions/customFlashcardHelper");
+    
+    // Get the document and its extracted text
+    const document = await prisma.document.findUnique({ 
+      where: { id: documentId },
+      select: { 
+        id: true, 
+        extractedText: true, 
+        filename: true 
+      }
+    });
+    
+    if (!document || !document.extractedText) {
+      console.log('❌ No document or extracted text found');
+      return;
+    }
+
+    // Get category from translation
+    const translation = await prisma.documentTranslation.findUnique({
+      where: { documentId },
+      select: { textEnglish: true }
+    });
+    
+    if (!translation) {
+      console.log('❌ No translation found, skipping flashcard generation');
+      return;
+    }
+
+    console.log('🎴 Generating flashcards and questions from extracted text...');
+    const existingDbTermsEnglish = await getExistingTerms(userId);
+
+    const generation = await generateCustomFromOCR({
+      ocrText: document.extractedText,
+      userId,
+      documentId,
+      existingDbTermsEnglish,
+    });
+
+    // Default to General category (user can change later)
+    const quizData = createQuizData(documentId, userId, document.filename);
+    const flashcardData = transformToFlashcardData(generation.terms, documentId, userId);
+    const indexToIdMap = createIndexToIdMap(flashcardData);
+    const questionData = transformToQuestionData(
+      generation.questions,
+      indexToIdMap,
+      quizData.id,
+      userId
+    );
+
+    // Save all data in transaction
+    await prisma.$transaction([
+      prisma.customQuiz.create({ data: quizData }),
+      ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
+      ...questionData.map((data) => prisma.customQuestion.create({ data })),
+    ]);
+
+    console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`);
+    
+    // Mark document as fully processed
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { ocrProcessed: true }
+    });
+    
+    console.log(`${'='.repeat(60)}`);
+    console.log(`✨ FLASHCARD GENERATION COMPLETE FOR ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+  } catch (error) {
+    console.error(`❌ Flashcard generation failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    
+    // Mark as processed even on error to prevent retry loops
+    try {
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { ocrProcessed: true }
+      });
+    } catch (updateError) {
+      console.error('Failed to update document status:', updateError);
+    }
+  }
+}
+
+// ============================================================================
+// CONTROLLER FUNCTIONS
+// ============================================================================
+
+
 export const getUploadUrl = async (c: Context) => {
   try {
     const { filename, type } = await c.req.json();
@@ -51,22 +212,50 @@ export const saveDocument = async (c: Context) => {
         fileType,
         fileSize: fileSize || null,
         extractedText: extractedText || null,
-        ocrProcessed: extractedText ? true : false,
+        ocrProcessed: false,
         userId: user.id,
       },
     });
 
     const ocrSupportedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (ocrSupportedTypes.includes(fileType) && !extractedText) {
-      console.log(`🚀 Triggering auto processing for ${filename}`);
-      autoProcessDocument(document.id, user.id).catch(err => 
-        console.error('❌ Background processing error:', err)
-      );
+    if (ocrSupportedTypes.includes(fileType)) {
+      console.log(`🚀 Starting OCR extraction for ${filename}`);
+      
+      try {
+        // STEP 1: Extract text with OCR (SYNCHRONOUS - wait for this ONLY)
+        const extractedText = await extractTextWithOCR(document.id, user.id);
+        
+        if (extractedText) {
+          console.log(`✅ OCR completed for ${document.id}`);
+          
+          // STEP 2 & 3: Translation + Flashcards (ASYNCHRONOUS - background)
+          // This will continue even if user navigates away
+          setImmediate(() => {
+            translateDocument(document.id, user.id, extractedText)
+              .then(() => {
+                console.log(`✅ Translation completed for ${document.id}`);
+                // Generate flashcards AFTER translation completes
+                return generateFlashcardsAndQuestions(document.id, user.id);
+              })
+              .then(() => {
+                console.log(`✅ Flashcards and questions generated for ${document.id}`);
+              })
+              .catch((err: Error) => {
+                console.error(`❌ Background processing error for ${document.id}:`, err);
+              });
+          });
+        } else {
+          console.log(`⚠️ No text extracted from ${document.id}`);
+        }
+      } catch (error) {
+        console.error(`❌ OCR extraction error for ${document.id}:`, error);
+        // Continue to return document even if OCR fails
+      }
     }
 
     return c.json({ 
       document,
-      redirectUrl: `/documents/${document.id}/translation`
+      redirectUrl: `/documents/${document.id}/translation`  
     });
   } catch (error) {
     console.error("Save document error:", error);
@@ -251,6 +440,11 @@ export const getDocumentStatus = async (c: Context) => {
         questionCount,
         category: quiz?.category || null,
       },
+       translation: document.translation,
+      document: {
+        id: document.id,
+        filename: document.filename,
+      }
     });
   } catch (error) {
     console.error("Get document status error:", error);
@@ -270,12 +464,37 @@ export const getDocumentTranslation = async (c: Context) => {
     const translation = await prisma.documentTranslation.findUnique({
       where: { documentId: id },
       include: {
-        document: true,
+        document: {
+          include: {
+            customQuizzes: {
+              include: {
+                questions: true,
+              },
+            },
+          },
+        },
       },
     });
 
     if (!translation) {
-      return c.json({ error: "Translation not found" }, 404);
+      const document = await prisma.document.findUnique({
+        where: { id },
+      });
+
+      if (!document) {
+        return c.json({ error: "Document not found" }, 404);
+      }
+
+      if (document.userId !== user.id) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+
+      // Translation is being processed in background
+      return c.json({ 
+        translation: null,
+        processing: true,
+        message: "Translation is being generated. Please wait..."
+      });
     }
 
     if (translation.document.userId !== user.id) {
@@ -330,100 +549,3 @@ export const triggerOCR = async (c: Context) => {
   }
 };
 
-
-async function autoProcessDocument(documentId: string, userId: string) {
-  try {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`📄 AUTO-PROCESSING DOCUMENT: ${documentId}`);
-    console.log(`${'='.repeat(60)}\n`);
-    
-    console.log('📖 Step 1: Extracting text with OCR...');
-    const extractedText = await performOCRStep(documentId, userId);
-    
-    if (!extractedText) {
-      console.log('❌ No text extracted, stopping pipeline');
-      return;
-    }
-    
-    console.log(`✅ Extracted ${extractedText.length} characters\n`);
-    
-    console.log('🌐 Step 2: Translating to all languages...');
-    await performTranslationStep(documentId, userId, extractedText);
-    console.log('✅ Translation complete\n');
-
-    console.log('🎴 Step 3: Generating flashcards and questions...');
-    await performFlashcardGenerationStep(documentId, userId, extractedText);
-    console.log('✅ Flashcards and questions generated\n');
-    
-    console.log(`${'='.repeat(60)}`);
-    console.log(`✨ AUTO-PROCESSING COMPLETE FOR ${documentId}`);
-    console.log(`${'='.repeat(60)}\n`);
-    
-  } catch (error) {
-    console.error(`❌ Auto-processing failed for ${documentId}:`, error);
-  }
-}
-
-async function performOCRStep(documentId: string, userId: string): Promise<string | null> {
-  const { performOCR } = await import("./helperFunctions/documentHelper");
-  return await performOCR(documentId, userId);
-}
-
-async function performTranslationStep(documentId: string, userId: string, text: string) {
-  const { translateFullDocument } = await import("./helperFunctions/documentHelper");
-  
-  const translationData = await translateFullDocument(text, documentId, userId);
-  
-  await prisma.documentTranslation.create({
-    data: translationData,
-  });
-}
-
-async function performFlashcardGenerationStep(
-  documentId: string,
-  userId: string,
-  ocrText: string
-) {
-  const document = await prisma.document.findUnique({ 
-    where: { id: documentId } 
-  });
-  
-  if (!document) throw new Error("Document not found");
-
-  const { 
-    getExistingTerms,
-    createQuizData,
-    transformToFlashcardData,
-    transformToQuestionData,
-    createIndexToIdMap 
-  } = await import("./helperFunctions/documentHelper");
-  
-  const { generateCustomFromOCR } = await import("./helperFunctions/customFlashcardHelper");
-
-  const existingDbTermsEnglish = await getExistingTerms(userId);
-
-  const generation = await generateCustomFromOCR({
-    ocrText,
-    userId,
-    documentId,
-    existingDbTermsEnglish,
-  });
-
-  const quizData = createQuizData(documentId, userId, document.filename);
-  const flashcardData = transformToFlashcardData(generation.terms, documentId, userId);
-  const indexToIdMap = createIndexToIdMap(flashcardData);
-  const questionData = transformToQuestionData(
-    generation.questions,
-    indexToIdMap,
-    quizData.id,
-    userId
-  );
-
-  await prisma.$transaction([
-    prisma.customQuiz.create({ data: quizData }),
-    ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
-    ...questionData.map((data) => prisma.customQuestion.create({ data })),
-  ]);
-
-  console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions`);
-}

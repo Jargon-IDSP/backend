@@ -151,6 +151,25 @@ ${ocrText.slice(0, 3000)}
 }
 
 
+export function createQuizData(
+  documentId: string,
+  userId: string,
+  filename: string,
+  category: QuizCategory = "General"
+) {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    documentId,
+    name: filename,
+    category,
+    pointsPerQuestion: 10,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+
 export function getCategoryColor(category: QuizCategory | null): string {
   if (!category) return "#6B7280";
   
@@ -275,24 +294,6 @@ export async function getExistingTerms(userId: string): Promise<string[]> {
   ];
 }
 
-
-export function createQuizData(
-  documentId: string,
-  userId: string,
-  filename: string,
-  category: QuizCategory = "General"
-) {
-  return {
-    id: crypto.randomUUID(),
-    userId,
-    documentId,
-    name: filename,
-    category,
-    pointsPerQuestion: 10,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-}
 
 
 export function transformToFlashcardData(

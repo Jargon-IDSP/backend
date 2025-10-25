@@ -50,9 +50,15 @@ export async function extractTermsAndQuestions(
   existingDbTermsEnglish: string[]
 ): Promise<ExtractionResponse> {
   const extractionPrompt = `
-From the OCR text, select 10 DISTINCT, meaningful terms (no duplicates vs this list: ${existingDbTermsEnglish.slice(0, 200).join(", ")}).
+From the OCR text, you MUST select EXACTLY 10 DISTINCT, meaningful terms (no duplicates vs this list: ${existingDbTermsEnglish.slice(0, 200).join(", ")}).
+
+IMPORTANT: You must return exactly 10 terms and 10 questions. 
+- First, extract terms that appear directly in the document
+- If fewer than 10 terms are found, generate additional relevant terms related to the document's topic to reach exactly 10 terms
+- For example, if a document mentions "PPE" and "hard hat", you could add related terms like "safety goggles", "steel-toed boots", "high-visibility vest", etc.
+
 For each term provide a concise English definition (10–25 words).
-Also produce 10 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
+Also produce EXACTLY 10 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
 
 Return STRICT JSON ONLY:
 {

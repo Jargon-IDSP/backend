@@ -536,6 +536,97 @@ export const getRandomCustomFlashcard = async (c: Context) => {
   }
 };
 
+export const getCustomFlashcardsByCategory = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { category } = c.req.param();
+    const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language);
+
+    if (!category) {
+      return errorResponse(c, "Category is required", 400);
+    }
+
+    // Convert category string to match enum format (capitalize first letter)
+    const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+
+    // Find all quizzes with this category
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: user.id,
+        category: categoryEnum as any,
+      },
+      select: { id: true },
+    });
+
+    if (quizzes.length === 0) {
+      return c.json(successResponse([], {
+        count: 0,
+        category: categoryEnum,
+        selectedLanguage: lang,
+      }));
+    }
+
+    const quizIds = quizzes.map(q => q.id);
+
+    // Find all flashcards through questions that belong to these quizzes
+    const questions = await prisma.customQuestion.findMany({
+      where: {
+        userId: user.id,
+        customQuizId: { in: quizIds },
+      },
+      select: {
+        correctTermId: true,
+      },
+    });
+
+    const termIds = [...new Set(questions.map(q => q.correctTermId))];
+
+    const flashcards = await prisma.customFlashcard.findMany({
+      where: {
+        id: { in: termIds },
+        userId: user.id,
+      },
+      select: {
+        id: true,
+        termEnglish: true,
+        termFrench: true,
+        termChinese: true,
+        termSpanish: true,
+        termTagalog: true,
+        termPunjabi: true,
+        termKorean: true,
+        definitionEnglish: true,
+        definitionFrench: true,
+        definitionChinese: true,
+        definitionSpanish: true,
+        definitionTagalog: true,
+        definitionPunjabi: true,
+        definitionKorean: true,
+        document: {
+          select: {
+            id: true,
+            filename: true,
+          },
+        },
+      },
+    });
+
+    const displayFlashcards = flashcards.map(card => enrichCustomFlashcard(card, lang));
+
+    const response = successResponse(displayFlashcards, {
+      count: flashcards.length,
+      category: categoryEnum,
+      selectedLanguage: lang,
+    });
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching custom flashcards by category:", error);
+    return errorResponse(c, "Failed to fetch custom flashcards by category");
+  }
+};
+
 // Cache management controllers
 
 export const clearCache = async (c: Context) => {
