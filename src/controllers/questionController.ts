@@ -712,7 +712,8 @@ export const generateCustomQuiz = async (c: Context) => {
 // Complete Quiz and Update Points
 export const completeQuiz = async (c: Context) => {
   try {
-    const userId = c.get('userId');
+    const user = c.get('user');
+    const userId = user?.id;
     if (!userId) {
       return errorResponse(c, 'Unauthorized', 401);
     }
