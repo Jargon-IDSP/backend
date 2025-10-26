@@ -10,6 +10,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+enum QuizCategory {
+  Safety      
+  Technical  
+  Training    
+  Workplace   
+  Professional 
+  General     
+}
+
 model Industry {
   id   Int    @id @default(autoincrement())
   name String @unique
@@ -24,8 +39,8 @@ model Level {
   id   Int    @id @default(autoincrement())
   name String @unique
   
-  flashcards Flashcard[]
-  quizzes    Quiz[]
+  flashcards   Flashcard[]
+  quizAttempts UserQuizAttempt[]
   
   @@map("levels")
 }
@@ -57,8 +72,8 @@ model Flashcard {
   
   questions Question[] @relation("QuestionCorrectAnswer")
   
-  @@index([industryId])
-  @@index([levelId])
+  @@index([levelId, industryId])
+  @@index([industryId, levelId])
   @@index([termEnglish(length: 255)])
   @@map("flashcards")
 }
@@ -80,36 +95,15 @@ model Question {
   tags String @db.Text
   
   points Int     @default(5)
-  quizId String?
   
   correctAnswer Flashcard @relation("QuestionCorrectAnswer", fields: [correctTermId], references: [id])
-  quiz          Quiz?     @relation(fields: [quizId], references: [id], onDelete: SetNull)
   
-   @@index([correctTermId], map: "questions_correctTermId_fkey")
-  @@index([quizId])
+  @@index([correctTermId], map: "questions_correctTermId_fkey")
+  @@index([difficulty])
+  @@index([points])
   @@map("questions")
 }
 
-model Quiz {
-  id String @id @default(cuid())
-  
-  userId String
-  levelId Int
-  
-  completed Boolean @default(false)
-  score     Int     @default(0)
-  
-  createdAt DateTime @default(now())
-  completedAt DateTime?
-  
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  level     Level     @relation(fields: [levelId], references: [id])
-  questions Question[]
-  
-  @@index([userId])
-  @@index([levelId])
-  @@map("quizzes")
-}
 
 model Document {
   id            String    @id @default(cuid())
@@ -124,19 +118,48 @@ model Document {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  flashcards   CustomFlashcard[]
-  customQuizzes CustomQuiz[]      
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcards    CustomFlashcard[]
+  customQuizzes CustomQuiz[]
+  translation   DocumentTranslation?
   
   @@index([userId])
+  @@index([createdAt])
   @@map("documents")
 }
+
+model DocumentTranslation {
+  id String @id @default(cuid())
+  
+  documentId String @unique
+  userId     String
+  
+  textEnglish  String @db.LongText
+  textFrench   String @db.LongText
+  textChinese  String @db.LongText
+  textSpanish  String @db.LongText
+  textTagalog  String @db.LongText
+  textPunjabi  String @db.LongText
+  textKorean   String @db.LongText
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([documentId])
+  @@index([userId])
+  @@map("document_translations")
+}
+
 
 model CustomFlashcard {
   id String @id @default(cuid())
   
   documentId String?
   userId     String
+  category   QuizCategory @default(General)
   
   termEnglish  String @db.Text
   termFrench   String @db.Text
@@ -157,12 +180,14 @@ model CustomFlashcard {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document Document?          @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  questions CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
-  
-  @@index([documentId])
-  @@index([userId])
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document    Document?           @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  questions   CustomQuestion[]    @relation("CustomQuestionCorrectAnswer")
+  userAnswers UserQuizAnswer[]    @relation("UserQuizAnswers")
+
+  @@index([userId, createdAt])
+  @@index([documentId, createdAt])
+  @@index([category])
   @@index([termEnglish(length: 255)])
   @@map("custom_flashcards")
 }
@@ -172,8 +197,8 @@ model CustomQuestion {
   
   userId String
   customQuizId String?  
-
   correctTermId String
+  category QuizCategory @default(General)
   
   promptEnglish  String @db.Text
   promptFrench   String @db.Text
@@ -182,15 +207,19 @@ model CustomQuestion {
   promptTagalog  String @db.Text
   promptPunjabi  String @db.Text
   promptKorean   String @db.Text
+  
+  pointsWorth Int @default(10)
     
   createdAt DateTime @default(now())
   
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
   customQuiz    CustomQuiz?     @relation(fields: [customQuizId], references: [id], onDelete: SetNull)
+  userAnswers   UserQuizAnswer[] 
   
-  @@index([userId])
-  @@index([customQuizId])  // Change from quizId to customQuizId
+  @@index([userId, createdAt])
+  @@index([customQuizId, createdAt])
+  @@index([category])
   @@index([correctTermId])
   @@map("custom_questions")
 }
@@ -199,21 +228,23 @@ model CustomQuiz {
   id String @id @default(cuid())
   
   userId     String   
-  documentId String?    
+  documentId String?
+  name       String           
+  category   QuizCategory?     
   
-  completed   Boolean  @default(false)
-  score       Int      @default(0)
+  pointsPerQuestion Int @default(10)
   
-  createdAt   DateTime @default(now())
-  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document  Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  questions CustomQuestion[]
-  
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document   Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  questions  CustomQuestion[]
   sharedWith CustomQuizShare[]
+  attempts   UserQuizAttempt[] 
   
   @@index([userId])
+  @@index([category])
   @@index([documentId])
   @@map("custom_quizzes")
 }
@@ -235,6 +266,85 @@ model CustomQuizShare {
   @@map("custom_quiz_shares")
 }
 
+
+model UserQuizAttempt {
+  id String @id @default(cuid())
+  
+  userId       String
+  customQuizId String?  
+  levelId      Int?    
+  
+  questionsAnswered   Int @default(0)  
+  questionsCorrect    Int @default(0)  
+  totalQuestions      Int
+  
+  percentComplete     Int @default(0)  
+  percentCorrect      Int @default(0)  
+  
+  pointsEarned        Int @default(0)
+  maxPossiblePoints   Int
+  
+  completed   Boolean  @default(false)
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customQuiz CustomQuiz? @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  level      Level?      @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  answers    UserQuizAnswer[]
+  
+  @@index([userId])
+  @@index([customQuizId])
+  @@index([levelId])
+  @@index([completed])
+  @@index([userId, completed])
+  @@index([userId, customQuizId]) 
+  @@index([userId, levelId])
+  @@map("user_quiz_attempts")
+}
+
+model UserQuizAnswer {
+  id String @id @default(cuid())
+  
+  attemptId  String 
+  questionId String  
+  answerId   String  
+  
+  isCorrect    Boolean
+  pointsEarned Int @default(0)
+  
+  answeredAt DateTime @default(now())
+  
+  attempt  UserQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question CustomQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answer   CustomFlashcard @relation("UserQuizAnswers", fields: [answerId], references: [id], onDelete: Cascade)
+  
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
+  @@map("user_quiz_answers")
+}
+
+model UserWeeklyStats {
+  id String @id @default(cuid())
+  userId String
+  
+  weekStartDate DateTime 
+  weeklyScore Int @default(0)
+  daysActive String @default("") 
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, weekStartDate])
+  @@index([userId])
+  @@index([weekStartDate])
+  @@index([weeklyScore])
+  @@map("user_weekly_stats")
+}
+
 model User {
   id        String   @id
   email     String
@@ -247,27 +357,28 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  avatar           UserAvatar?
-  documents        Document[]
-  customFlashcards CustomFlashcard[]
-  customQuestions  CustomQuestion[]
-  quizzes          Quiz[]
-  customQuizzes    CustomQuiz[]           // Quizzes created by user
+  avatar               UserAvatar?
+  documents            Document[]
+  customFlashcards     CustomFlashcard[]
+  customQuestions      CustomQuestion[]
+  customQuizzes        CustomQuiz[] 
+  quizAttempts         UserQuizAttempt[]
+  documentTranslations DocumentTranslation[]
+  weeklyStats          UserWeeklyStats[]
   
   industry Industry? @relation(fields: [industryId], references: [id])
   
   friendshipsInitiated Friendship[] @relation("FriendshipRequester")
   friendshipsReceived  Friendship[] @relation("FriendshipAddressee")
   
-  sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")  // Quizzes shared with user
+  sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes") 
   
   @@index([email])
   @@index([score])
   @@index([industryId])
+  @@index([language])
   @@map("users")
 }
-
-
 
 model UserAvatar {
   id     String @id @default(cuid())
@@ -315,10 +426,4 @@ model Friendship {
   @@index([addresseeId])
   @@index([status])
   @@map("friendships")
-}
-
-enum FriendshipStatus {
-  PENDING
-  ACCEPTED
-  BLOCKED
 }

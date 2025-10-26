@@ -8,21 +8,22 @@ import {
   getDownloadUrl,
   deleteDocument,
   triggerOCR,
-  // saveOCRResult,
+  getDocumentStatus,
+  getDocumentTranslation,
 } from "../controllers/documentController";
 import { generateCustomForDocument } from "../controllers/customGenController";
-
-
 
 export const documentRoute = new Hono()
   .use("*", authMiddleware)
   .post("/upload/sign", getUploadUrl)
-  // .post("/ocr-result", saveOCRResult)
   .get("/", getUserDocuments)
   .post("/", saveDocument)
-  .post("/:id/ocr", triggerOCR)
-  .post("/:id/generate-custom", generateCustomForDocument)
+  .get("/:id/status", getDocumentStatus)
+  .get("/:id/translation", getDocumentTranslation)
   .get("/:id/download", getDownloadUrl)
   .get("/:id", getDocument)
-  .delete("/:id", deleteDocument);
+  .delete("/:id", deleteDocument)
   
+  // Manual triggers (kept for testing, hidden from UI)
+  .post("/:id/ocr", triggerOCR)
+  .post("/:id/generate-custom", generateCustomForDocument);

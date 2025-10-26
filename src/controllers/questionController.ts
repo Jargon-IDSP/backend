@@ -5,6 +5,7 @@ import {
   extractQueryParams,
   extractRouteParams,
   buildWhereClause,
+  normalizeLanguage,
 } from "./helperFunctions/flashcardHelper";
 import {
   enrichQuestion,
@@ -21,9 +22,8 @@ import {
   successResponse,
 } from "./helperFunctions/responseHelper";
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
-// Existing Questions
 
 export const getQuestionsByLevel = async (c: Context) => {
   try {
@@ -294,26 +294,21 @@ export const getQuizzesByLevel = async (c: Context) => {
     const cacheKey = generateCacheKey("quizzes-level", { levelId, userId });
 
     const response = await withCache(cacheKey, async () => {
-      const quizzes = await prisma.quiz.findMany({
+      const quizAttempts = await prisma.userQuizAttempt.findMany({
         where: {
           levelId: parseInt(levelId),
           userId,
         },
         include: {
           level: true,
-          questions: {
-            include: {
-              correctAnswer: true,
-            },
-          },
         },
         orderBy: {
-          createdAt: 'desc',
+          startedAt: 'desc',
         },
       });
 
-      return successResponse(quizzes, {
-        count: quizzes.length,
+      return successResponse(quizAttempts, {
+        count: quizAttempts.length,
         level_id: levelId,
         user_id: userId,
       });
@@ -340,19 +335,44 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
       return errorResponse(c, "User not authenticated", 401);
     }
 
-    const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId });
+    // First check if user owns the document
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { userId: true },
+    });
+
+    if (!document) {
+      return errorResponse(c, "Document not found", 404);
+    }
+
+    const isOwner = document.userId === userId;
+
+    const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId, isOwner });
 
     const response = await withCache(cacheKey, async () => {
+      // Get all quizzes for this document
       const quizzes = await prisma.customQuiz.findMany({
-        where: {
+        where: isOwner ? {
           documentId,
           userId,
+        } : {
+          documentId,
+          sharedWith: {
+            some: {
+              sharedWithUserId: userId,
+            },
+          },
         },
         include: {
-          document: true,
-          questions: {
-            include: {
-              correctAnswer: true,
+          document: {
+            select: {
+              id: true,
+              filename: true,
+            },
+          },
+          _count: {
+            select: {
+              questions: true,
             },
           },
         },
@@ -365,6 +385,7 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
         count: quizzes.length,
         document_id: documentId,
         user_id: userId,
+        is_owner: isOwner,
       });
     });
 
@@ -413,6 +434,148 @@ export const getCustomQuizzesByUser = async (c: Context) => {
   } catch (error: any) {
     console.error("Error fetching custom quizzes by user:", error);
     return errorResponse(c, error.message || "Failed to fetch custom quizzes", 500);
+  }
+};
+
+export const getCustomQuestionsByCategory = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { category } = c.req.param();
+    const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language);
+
+    if (!category) {
+      return errorResponse(c, "Category is required", 400);
+    }
+
+    const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+
+    const questions = await prisma.customQuestion.findMany({
+      where: {
+        userId: user.id,
+        customQuiz: {
+          category: categoryEnum as any,
+        },
+      },
+      include: {
+        correctAnswer: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    // Enrich questions with choices for quiz format
+    const displayQuestions = await Promise.all(
+      questions.map(q => enrichQuestionWithChoices(prisma, q, lang, true))
+    );
+
+    const response = successResponse(displayQuestions, {
+      count: questions.length,
+      category: categoryEnum,
+      selectedLanguage: lang,
+    });
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching custom questions by category:", error);
+    return errorResponse(c, "Failed to fetch custom questions by category");
+  }
+};
+
+export const getCustomQuizzesByCategory = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { category } = c.req.param();
+
+    if (!category) {
+      return errorResponse(c, "Category is required", 400);
+    }
+
+    const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: user.id,
+        category: categoryEnum as any,
+      },
+      include: {
+        document: true,
+        questions: {
+          include: {
+            correctAnswer: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return c.json(successResponse(quizzes, {
+      count: quizzes.length,
+      category: categoryEnum,
+    }));
+  } catch (error) {
+    console.error("Error fetching custom quizzes by category:", error);
+    return errorResponse(c, "Failed to fetch custom quizzes by category");
+  }
+};
+
+export const getCustomQuizById = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { quizId } = c.req.param();
+    const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language);
+
+    if (!quizId) {
+      return errorResponse(c, "Quiz ID is required", 400);
+    }
+
+    const quiz = await prisma.customQuiz.findUnique({
+      where: {
+        id: quizId,
+        userId: user.id,
+      },
+      include: {
+        document: true,
+        questions: {
+          include: {
+            correctAnswer: {
+              include: {
+                document: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!quiz) {
+      return errorResponse(c, "Quiz not found", 404);
+    }
+
+    if (quiz.questions.length === 0) {
+      return errorResponse(c, "Quiz has no questions", 404);
+    }
+
+    const enrichedQuestions = await Promise.all(
+      quiz.questions.map(async (q) => 
+        await enrichQuestionWithChoices(prisma, q, lang, true)
+      )
+    );
+
+    return c.json(successResponse(enrichedQuestions, {
+      quiz_id: quizId,
+      quiz_name: quiz.name,
+      category: quiz.category,
+      question_count: enrichedQuestions.length,
+      selectedLanguage: lang,
+    }));
+  } catch (error) {
+    console.error("Error fetching custom quiz by ID:", error);
+    return errorResponse(c, "Failed to fetch custom quiz");
   }
 };
 
@@ -563,5 +726,170 @@ export const generateCustomQuiz = async (c: Context) => {
   } catch (error: any) {
     console.error("Error generating custom quiz:", error);
     return errorResponse(c, error.message || "Failed to generate custom quiz", 500);
+  }
+};
+
+export const completeQuiz = async (c: Context) => {
+  try {
+    const user = c.get('user');
+    const userId = user?.id;
+    if (!userId) {
+      return errorResponse(c, 'Unauthorized', 401);
+    }
+
+    const { quizId, type, score, totalQuestions, levelId: requestLevelId } = await c.req.json();
+
+    console.log('Complete quiz request:', { userId, quizId, type, score, totalQuestions, requestLevelId });
+
+    if (!type || score === undefined || !totalQuestions) {
+      return errorResponse(c, 'Missing required fields: type, score, totalQuestions', 400);
+    }
+
+    const pointsEarned = score * 5; 
+    console.log('Points earned:', pointsEarned);
+
+    if (type === 'existing') {
+      if (!quizId || !requestLevelId) {
+        return errorResponse(c, 'Missing quizId or levelId for existing quiz', 400);
+      }
+
+      const percentCorrect = Math.round((score / totalQuestions) * 100);
+
+      const quizAttempt = await prisma.userQuizAttempt.create({
+        data: {
+          id: quizId, 
+          userId,
+          levelId: parseInt(requestLevelId),
+          questionsAnswered: totalQuestions,
+          questionsCorrect: score,
+          totalQuestions,
+          percentComplete: 100,
+          percentCorrect,
+          pointsEarned,
+          maxPossiblePoints: totalQuestions * 5,
+          completed: true,
+          completedAt: new Date(),
+        },
+      });
+
+      console.log('Created quiz attempt for prebuilt quiz:', quizAttempt);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          score: {
+            increment: pointsEarned,
+          },
+        },
+      });
+
+      const now = new Date();
+      const dayOfWeek = now.getUTCDay();
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const weekStartDate = new Date(now);
+      weekStartDate.setUTCDate(now.getUTCDate() - daysToMonday);
+      weekStartDate.setUTCHours(0, 0, 0, 0);
+
+      await prisma.userWeeklyStats.upsert({
+        where: {
+          userId_weekStartDate: {
+            userId,
+            weekStartDate,
+          },
+        },
+        update: {
+          weeklyScore: {
+            increment: pointsEarned,
+          },
+        },
+        create: {
+          userId,
+          weekStartDate,
+          weeklyScore: pointsEarned,
+        },
+      });
+
+      console.log('Updated user score and weekly stats');
+      return c.json(successResponse({ quizAttempt, pointsEarned }));
+    } else if (type === 'custom') {
+      const percentCorrect = Math.round((score / totalQuestions) * 100);
+      
+      let attempt = null;
+      
+      if (quizId) {
+        console.log('Checking for custom quiz with ID:', quizId);
+        const customQuiz = await prisma.customQuiz.findUnique({
+          where: { id: quizId },
+        });
+
+        if (customQuiz) {
+          console.log('Found custom quiz, creating attempt');
+          attempt = await prisma.userQuizAttempt.create({
+            data: {
+              userId,
+              customQuizId: quizId,
+              questionsAnswered: totalQuestions,
+              questionsCorrect: score,
+              totalQuestions,
+              percentComplete: 100,
+              percentCorrect,
+              pointsEarned,
+              maxPossiblePoints: totalQuestions * 10,
+              completed: true,
+              completedAt: new Date(),
+            },
+          });
+          console.log('Created quiz attempt:', attempt);
+        } else {
+          console.log('Custom quiz not found with ID:', quizId);
+        }
+      } else {
+        console.log('No quizId provided for custom quiz');
+      }
+      console.log('Updating user score...');
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          score: {
+            increment: pointsEarned,
+          },
+        },
+      });
+      console.log('Updated user score. New score:', updatedUser.score);
+
+      const now = new Date();
+      const dayOfWeek = now.getUTCDay();
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const weekStartDate = new Date(now);
+      weekStartDate.setUTCDate(now.getUTCDate() - daysToMonday);
+      weekStartDate.setUTCHours(0, 0, 0, 0);
+
+      const weeklyStats = await prisma.userWeeklyStats.upsert({
+        where: {
+          userId_weekStartDate: {
+            userId,
+            weekStartDate,
+          },
+        },
+        update: {
+          weeklyScore: {
+            increment: pointsEarned,
+          },
+        },
+        create: {
+          userId,
+          weekStartDate,
+          weeklyScore: pointsEarned,
+        },
+      });
+
+      console.log('Updated weekly stats:', weeklyStats);
+      return c.json(successResponse({ attempt, pointsEarned, userScore: updatedUser.score }));
+    }
+
+    return errorResponse(c, 'Invalid quiz type', 400);
+  } catch (error: any) {
+    console.error('Error completing quiz:', error);
+    return errorResponse(c, error.message || 'Failed to complete quiz', 500);
   }
 };

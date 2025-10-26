@@ -51,6 +51,18 @@ export const getDefinitionForLanguage = (flashcard: any, language: string): stri
   return langMap[lang] || flashcard.definitionEnglish;
 };
 
+export const getAllPromptsIndexed = (question: any) => {
+  return {
+    english: question.promptEnglish,
+    french: question.promptFrench,
+    chinese: question.promptChinese,
+    spanish: question.promptSpanish,
+    tagalog: question.promptTagalog,
+    punjabi: question.promptPunjabi,
+    korean: question.promptKorean,
+  };
+};
+
 export const getRandomWrongAnswers = async (
   prisma: any,
   correctTermId: string,
@@ -144,13 +156,25 @@ export const enrichQuestionWithChoices = async (
   
   const choices = formatChoices(question.correctAnswer, wrongAnswers, language);
   
-  return {
+  const result: any = {
     questionId: question.id,
     prompt: getPromptForLanguage(question, language),
+    prompts: getAllPromptsIndexed(question), // All language versions indexed
     choices,
-    difficulty: question.difficulty,
-    tags: typeof question.tags === 'string' ? JSON.parse(question.tags) : question.tags,
     language,
     correctAnswerId: question.correctTermId,
   };
+
+  // Only add difficulty and tags for prebuilt questions
+  if (!isCustom) {
+    result.difficulty = question.difficulty;
+    result.tags = typeof question.tags === 'string' ? JSON.parse(question.tags) : question.tags;
+  }
+
+  // Add pointsWorth for custom questions
+  if (isCustom && question.pointsWorth) {
+    result.pointsWorth = question.pointsWorth;
+  }
+
+  return result;
 };

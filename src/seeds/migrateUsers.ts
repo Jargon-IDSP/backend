@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 interface ClerkUser {
   id: string;

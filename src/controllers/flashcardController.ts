@@ -1,6 +1,4 @@
 import type { Context } from "hono";
-const prismaModule = (await import("@prisma/client")) as any;
-const { PrismaClient } = prismaModule;
 import type { FlashcardWithRelations, LevelData } from "../interfaces/flashcardData";
 import {
   extractQueryParams,
@@ -8,9 +6,8 @@ import {
   buildWhereClause,
   calculateAvailableTerms,
   enrichFlashcard,
-  combineFlashcardsForPractice,
-  enrichCustomFlashcard,
-} from "./helperFunctions/flashcardHelper";
+  combineFlashcardsForPractice} from "./helperFunctions/flashcardHelper";
+  import { enrichCustomFlashcard } from "./helperFunctions/customFlashcardHelper";
 import {
   generateCacheKey,
   withCache,
@@ -21,8 +18,10 @@ import {
   errorResponse,
   successResponse,
 } from "./helperFunctions/responseHelper";
+import { normalizeLanguage, getFlashcardSelect } from './helperFunctions/flashcardHelper';
 
-const prisma = new PrismaClient();
+
+import { prisma } from '../lib/prisma';
 
 let flashcardCache: {
   id: string;
@@ -47,12 +46,12 @@ export const initializeCache = async () => {
   }
 };
 
-// Default flashcard controllers
 
 export const getFlashcardsByLevel = async (c: Context) => {
   try {
     const { levelId } = extractRouteParams(c);
     const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language); 
 
     if (!levelId) {
       return errorResponse(c, "Level ID is required", 400);
@@ -63,9 +62,10 @@ export const getFlashcardsByLevel = async (c: Context) => {
     const response = await withCache(cacheKey, async () => {
       const flashcards = await prisma.flashcard.findMany({
         where: { levelId: parseInt(levelId) },
-        include: {
-          industry: true,
-          level: true,
+        select: {
+      ...getFlashcardSelect(lang),
+          industry: { select: { name: true } },
+      level: { select: { name: true } }
         },
       });
 
@@ -73,9 +73,7 @@ export const getFlashcardsByLevel = async (c: Context) => {
         throw new Error("No flashcards found for this level");
       }
 
-      const displayFlashcards = flashcards.map((card: FlashcardWithRelations) =>
-        enrichFlashcard(card, language)
-      );
+      const displayFlashcards = flashcards.map(card => enrichFlashcard(card, lang));
 
       return successResponse(displayFlashcards, {
         count: flashcards.length,
@@ -373,14 +371,14 @@ export const getLevels = async (c: Context) => {
 
         const levelsWithCounts = await Promise.all(
           levels.map(async (level: LevelData) => {
-            const counts = await calculateAvailableTerms(prisma, level.id, parsedIndustryId);
+          const terms = await calculateAvailableTerms(level.id, parsedIndustryId);
 
             return {
               ...level,
-              available_terms: counts.totalAvailable,
-              industry_terms: counts.industryCount,
-              general_terms: counts.generalCount,
-              total_general_terms: counts.totalGeneralCount,
+              available_terms: terms.totalAvailable,      
+              industry_terms: terms.industryCount,        
+              general_terms: terms.generalCount,          
+              total_general_terms: terms.totalGeneralCount,
             };
           })
         );
@@ -534,6 +532,97 @@ export const getRandomCustomFlashcard = async (c: Context) => {
   } catch (error) {
     console.error("Error fetching random custom flashcard:", error);
     return errorResponse(c, "Failed to fetch random custom flashcard");
+  }
+};
+
+export const getCustomFlashcardsByCategory = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { category } = c.req.param();
+    const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language);
+
+    if (!category) {
+      return errorResponse(c, "Category is required", 400);
+    }
+
+    // Convert category string to match enum format (capitalize first letter)
+    const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+
+    // Find all quizzes with this category
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: user.id,
+        category: categoryEnum as any,
+      },
+      select: { id: true },
+    });
+
+    if (quizzes.length === 0) {
+      return c.json(successResponse([], {
+        count: 0,
+        category: categoryEnum,
+        selectedLanguage: lang,
+      }));
+    }
+
+    const quizIds = quizzes.map(q => q.id);
+
+    // Find all flashcards through questions that belong to these quizzes
+    const questions = await prisma.customQuestion.findMany({
+      where: {
+        userId: user.id,
+        customQuizId: { in: quizIds },
+      },
+      select: {
+        correctTermId: true,
+      },
+    });
+
+    const termIds = [...new Set(questions.map(q => q.correctTermId))];
+
+    const flashcards = await prisma.customFlashcard.findMany({
+      where: {
+        id: { in: termIds },
+        userId: user.id,
+      },
+      select: {
+        id: true,
+        termEnglish: true,
+        termFrench: true,
+        termChinese: true,
+        termSpanish: true,
+        termTagalog: true,
+        termPunjabi: true,
+        termKorean: true,
+        definitionEnglish: true,
+        definitionFrench: true,
+        definitionChinese: true,
+        definitionSpanish: true,
+        definitionTagalog: true,
+        definitionPunjabi: true,
+        definitionKorean: true,
+        document: {
+          select: {
+            id: true,
+            filename: true,
+          },
+        },
+      },
+    });
+
+    const displayFlashcards = flashcards.map(card => enrichCustomFlashcard(card, lang));
+
+    const response = successResponse(displayFlashcards, {
+      count: flashcards.length,
+      category: categoryEnum,
+      selectedLanguage: lang,
+    });
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching custom flashcards by category:", error);
+    return errorResponse(c, "Failed to fetch custom flashcards by category");
   }
 };
 

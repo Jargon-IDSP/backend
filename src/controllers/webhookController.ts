@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { PrismaClient } from "@prisma/client";
 import { Webhook } from "svix";
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 interface ClerkUserData {
   id: string;

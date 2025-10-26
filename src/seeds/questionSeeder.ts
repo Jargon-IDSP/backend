@@ -5,7 +5,7 @@ const dataDirectory = '../backend/jargon-terms'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
-const prisma = new PrismaClient()
+import { prisma } from '../lib/prisma';
 
 interface QuestionJson {
   id: string

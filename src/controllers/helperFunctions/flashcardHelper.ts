@@ -1,4 +1,16 @@
 import type { Context } from "hono";
+import { prisma } from "../../lib/prisma";
+import type { Langs } from "../../interfaces/customFlashcard";
+import {
+  normalizeLanguage,
+  getLanguageFieldName,
+  getLanguageValue,
+  getAllLanguageFields,
+  getLanguageSelect,
+  convertToDisplayFormat,
+} from "./translationHelper";
+
+export { normalizeLanguage, getLanguageFieldName, getLanguageValue, getAllLanguageFields };
 
 export const extractQueryParams = (c: Context) => {
   return {
@@ -8,6 +20,7 @@ export const extractQueryParams = (c: Context) => {
   };
 };
 
+
 export const extractRouteParams = (c: Context) => {
   return {
     levelId: c.req.param("levelId"),
@@ -16,6 +29,7 @@ export const extractRouteParams = (c: Context) => {
     userId: c.req.param("userId"),
   };
 };
+
 
 export const buildWhereClause = (filters: {
   levelId?: string | number | null;
@@ -46,57 +60,48 @@ export const buildWhereClause = (filters: {
 };
 
 
-export const getLanguageValue = (
-  data: any,
-  fieldPrefix: string,
-  language: string
-): string | undefined => {
-  const lang = language.toLowerCase();
-  
-  const languageMap: { [key: string]: string } = {
-    french: data[`${fieldPrefix}French`],
-    chinese: data[`${fieldPrefix}Chinese`],
-    spanish: data[`${fieldPrefix}Spanish`],
-    tagalog: data[`${fieldPrefix}Tagalog`],
-    punjabi: data[`${fieldPrefix}Punjabi`],
-    korean: data[`${fieldPrefix}Korean`],
-  };
-  return languageMap[lang];
+export function getFlashcardSelect(userLanguage: Langs = "english") {
+  return getLanguageSelect(userLanguage, {
+    id: true,
+    industryId: true,
+    levelId: true,
+  });
+}
+
+
+export const convertFlashcardToDisplayFormat = (dbFlashcard: any, language?: string) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { language },
+    {
+      industry_id: dbFlashcard.industryId,
+      level_id: dbFlashcard.levelId,
+    }
+  );
 };
 
-export const convertToDisplayFormat = (dbFlashcard: any, language?: string) => {
-  const result: any = {
-    id: dbFlashcard.id,
-    term: {
-      english: dbFlashcard.termEnglish,
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish,
-    },
-    industry_id: dbFlashcard.industryId,
-    level_id: dbFlashcard.levelId,
-  };
 
-  if (language && language !== "english") {
-    const termTranslation = getLanguageValue(dbFlashcard, "term", language);
-    const defTranslation = getLanguageValue(dbFlashcard, "definition", language);
-    
-    if (termTranslation) result.term[language] = termTranslation;
-    if (defTranslation) result.definition[language] = defTranslation;
-  }
-
-  return result;
+export const convertFlashcardToDisplayFormatAllLanguages = (dbFlashcard: any) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { includeAllLanguages: true },
+    {
+      industry_id: dbFlashcard.industryId,
+      level_id: dbFlashcard.levelId,
+    }
+  );
 };
 
 export const enrichFlashcard = (flashcard: any, language?: string) => {
   const lang = language?.toLowerCase() || 'english';
   
   return {
-    ...convertToDisplayFormat(flashcard, lang),
+    ...convertFlashcardToDisplayFormat(flashcard, lang),
     industry: flashcard.industry?.name || "General",
     level: flashcard.level?.name || null,
   };
 };
+
 
 export const combineFlashcardsForPractice = (
   industryFlashcards: any[],
@@ -106,7 +111,6 @@ export const combineFlashcardsForPractice = (
 };
 
 export const calculateAvailableTerms = async (
-  prisma: any,
   levelId: number,
   industryId: number | null
 ) => {
@@ -140,43 +144,102 @@ export const calculateAvailableTerms = async (
   };
 };
 
-// Custom flashcard helpers
 
-export const convertCustomToDisplayFormat = (dbFlashcard: any, language?: string) => {
-  const result: any = {
-    id: dbFlashcard.id,
-    documentId: dbFlashcard.documentId,
-    userId: dbFlashcard.userId,
-    term: {
-      english: dbFlashcard.termEnglish,
+export async function getFlashcardsByLevel(levelId: number, userLanguage: string = "english") {
+  const lang = normalizeLanguage(userLanguage);
+  
+  const flashcards = await prisma.flashcard.findMany({
+    where: { levelId },
+    select: {
+      ...getFlashcardSelect(lang),
+      industry: {
+        select: { name: true }
+      },
+      level: {
+        select: { name: true }
+      }
     },
-    definition: {
-      english: dbFlashcard.definitionEnglish,
+  });
+
+  return flashcards.map(fc => enrichFlashcard(fc, lang));
+}
+
+
+export async function getFlashcardsByIndustry(industryId: number, userLanguage: string = "english") {
+  const lang = normalizeLanguage(userLanguage);
+  
+  const flashcards = await prisma.flashcard.findMany({
+    where: { industryId },
+    select: {
+      ...getFlashcardSelect(lang),
+      industry: {
+        select: { name: true }
+      },
+      level: {
+        select: { name: true }
+      }
     },
-  };
+  });
 
-  if (language && language !== "english") {
-    const termTranslation = getLanguageValue(dbFlashcard, "term", language);
-    const defTranslation = getLanguageValue(dbFlashcard, "definition", language);
-    
-    if (termTranslation) result.term[language] = termTranslation;
-    if (defTranslation) result.definition[language] = defTranslation;
-  }
+  return flashcards.map(fc => enrichFlashcard(fc, lang));
+}
 
-  return result;
-};
 
-export const enrichCustomFlashcard = (flashcard: any, language?: string) => {
-  const lang = language?.toLowerCase() || 'english';
+export async function getFlashcardsForPractice(
+  levelId: number,
+  industryId: number | null,
+  userLanguage: string = "english"
+) {
+  const lang = normalizeLanguage(userLanguage);
+  
+  const industryFlashcards = industryId
+    ? await prisma.flashcard.findMany({
+        where: { levelId, industryId },
+        select: {
+          ...getFlashcardSelect(lang),
+          industry: { select: { name: true } },
+          level: { select: { name: true } }
+        },
+        take: 50,
+      })
+    : [];
+
+  const remainingSlots = 50 - industryFlashcards.length;
+  const generalFlashcards = remainingSlots > 0
+    ? await prisma.flashcard.findMany({
+        where: { levelId, industryId: null },
+        select: {
+          ...getFlashcardSelect(lang),
+          industry: { select: { name: true } },
+          level: { select: { name: true } }
+        },
+        take: remainingSlots,
+      })
+    : [];
+
+  const combined = combineFlashcardsForPractice(industryFlashcards, generalFlashcards);
+  return combined.map(fc => enrichFlashcard(fc, lang));
+}
+
+
+export async function getFlashcardAllLanguages(id: string) {
+  const flashcard = await prisma.flashcard.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      ...getAllLanguageFields(),
+      industryId: true,
+      levelId: true,
+      industry: { select: { name: true } },
+      level: { select: { name: true } }
+    },
+  });
+
+  if (!flashcard) return null;
   
   return {
-    ...convertCustomToDisplayFormat(flashcard, lang),
-    document: flashcard.document
-      ? {
-          id: flashcard.document.id,
-          filename: flashcard.document.filename,
-          fileUrl: flashcard.document.fileUrl,
-        }
-      : null,
+    ...convertFlashcardToDisplayFormatAllLanguages(flashcard),
+    industry: flashcard.industry?.name || "General",
+    level: flashcard.level?.name || null,
   };
-};
+}

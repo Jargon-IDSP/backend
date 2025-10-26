@@ -5,9 +5,158 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3 } from "../config/s3";
+import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
-import { getGoogleAccessToken } from "../lib/OCRData";
+
+// ============================================================================
+// HELPER FUNCTIONS FOR DOCUMENT PROCESSING
+// ============================================================================
+
+// SYNCHRONOUS: Extract text with OCR only (wait for completion)
+async function extractTextWithOCR(documentId: string, userId: string): Promise<string | null> {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`� EXTRACTING TEXT: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { performOCR } = await import("./helperFunctions/documentHelper");
+    
+    const extractedText = await performOCR(documentId, userId);
+    
+    if (!extractedText) {
+      console.log('❌ No text extracted');
+      return null;
+    }
+    
+    console.log(`✅ Extracted ${extractedText.length} characters\n`);
+    
+    return extractedText;
+    
+  } catch (error) {
+    console.error(`❌ OCR extraction failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    throw error;
+  }
+}
+
+// ASYNCHRONOUS: Translate document in background
+async function translateDocument(documentId: string, userId: string, extractedText: string) {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🌐 TRANSLATING DOCUMENT: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { translateFullDocument } = await import("./helperFunctions/documentHelper");
+    
+    // Translate to all languages
+    console.log('🌐 Translating to all languages...');
+    const translationData = await translateFullDocument(extractedText, documentId, userId);
+    await prisma.documentTranslation.create({ data: translationData });
+    console.log('✅ Translation complete\n');
+    
+    console.log(`${'='.repeat(60)}`);
+    console.log(`✨ TRANSLATION COMPLETE FOR ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+  } catch (error) {
+    console.error(`❌ Translation failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    throw error;
+  }
+}
+
+async function generateFlashcardsAndQuestions(documentId: string, userId: string) {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🎴 ASYNC FLASHCARD GENERATION: ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    const { 
+      getExistingTerms,
+      createQuizData,
+      transformToFlashcardData,
+      transformToQuestionData,
+      createIndexToIdMap 
+    } = await import("./helperFunctions/documentHelper");
+    
+    const { generateCustomFromOCR } = await import("./helperFunctions/customFlashcardHelper");
+    
+    const document = await prisma.document.findUnique({ 
+      where: { id: documentId },
+      select: { 
+        id: true, 
+        extractedText: true, 
+        filename: true 
+      }
+    });
+    
+    if (!document || !document.extractedText) {
+      console.log('❌ No document or extracted text found');
+      return;
+    }
+
+    const translation = await prisma.documentTranslation.findUnique({
+      where: { documentId },
+      select: { textEnglish: true }
+    });
+    
+    if (!translation) {
+      console.log('❌ No translation found, skipping flashcard generation');
+      return;
+    }
+
+    console.log('🎴 Generating flashcards and questions from extracted text...');
+    const existingDbTermsEnglish = await getExistingTerms(userId);
+
+    const generation = await generateCustomFromOCR({
+      ocrText: document.extractedText,
+      userId,
+      documentId,
+      existingDbTermsEnglish,
+    });
+
+    const quizData = createQuizData(documentId, userId, document.filename);
+    const flashcardData = transformToFlashcardData(generation.terms, documentId, userId);
+    const indexToIdMap = createIndexToIdMap(flashcardData);
+    const questionData = transformToQuestionData(
+      generation.questions,
+      indexToIdMap,
+      quizData.id,
+      userId
+    );
+
+    await prisma.$transaction([
+      prisma.customQuiz.create({ data: quizData }),
+      ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
+      ...questionData.map((data) => prisma.customQuestion.create({ data })),
+    ]);
+
+    console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`);
+    
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { ocrProcessed: true }
+    });
+    
+    console.log(`${'='.repeat(60)}`);
+    console.log(`✨ FLASHCARD GENERATION COMPLETE FOR ${documentId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+  } catch (error) {
+    console.error(`❌ Flashcard generation failed for ${documentId}:`, error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    
+    try {
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { ocrProcessed: true }
+      });
+    } catch (updateError) {
+      console.error('Failed to update document status:', updateError);
+    }
+  }
+}
+
 
 export const getUploadUrl = async (c: Context) => {
   try {
@@ -52,20 +201,47 @@ export const saveDocument = async (c: Context) => {
         fileType,
         fileSize: fileSize || null,
         extractedText: extractedText || null,
-        ocrProcessed: extractedText ? true : false,
+        ocrProcessed: false,
         userId: user.id,
       },
     });
 
     const ocrSupportedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (ocrSupportedTypes.includes(fileType) && !extractedText) {
-      console.log(`Triggering auto OCR for ${filename}`);
-      autoTriggerOCR(document.id, user.id).catch(err => 
-        console.error('Background OCR error:', err)
-      );
+    if (ocrSupportedTypes.includes(fileType)) {
+      console.log(`🚀 Starting OCR extraction for ${filename}`);
+      
+      try {
+        const extractedText = await extractTextWithOCR(document.id, user.id);
+        
+        if (extractedText) {
+          console.log(`✅ OCR completed for ${document.id}`);
+          
+          setImmediate(() => {
+            translateDocument(document.id, user.id, extractedText)
+              .then(() => {
+                console.log(`✅ Translation completed for ${document.id}`);
+                return generateFlashcardsAndQuestions(document.id, user.id);
+              })
+              .then(() => {
+                console.log(`✅ Flashcards and questions generated for ${document.id}`);
+              })
+              .catch((err: Error) => {
+                console.error(`❌ Background processing error for ${document.id}:`, err);
+              });
+          });
+        } else {
+          console.log(`⚠️ No text extracted from ${document.id}`);
+        }
+      } catch (error) {
+        console.error(`❌ OCR extraction error for ${document.id}:`, error);
+      }
     }
 
-    return c.json({ document });
+    return c.json({ 
+      document,
+      redirectUrl: `/documents/user`,
+      documentId: document.id
+    });
   } catch (error) {
     console.error("Save document error:", error);
     return c.json({ error: String(error) }, 500);
@@ -193,89 +369,128 @@ export const deleteDocument = async (c: Context) => {
   }
 };
 
-async function autoTriggerOCR(documentId: string, userId: string) {
+export const getDocumentStatus = async (c: Context) => {
   try {
-    console.log(`[Auto OCR] Starting for document ${documentId}`);
+    const id = c.req.param("id");
+    const user = c.get("user");
     
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
     const document = await prisma.document.findUnique({
-      where: { id: documentId },
-    });
-
-    if (!document || document.userId !== userId) {
-      console.error(`[Auto OCR] Document ${documentId} not found or unauthorized`);
-      return;
-    }
-
-    const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (!AllowedFileTypes.includes(document.fileType)) {
-      console.log(`[Auto OCR] File type ${document.fileType} not supported`);
-      return;
-    }
-
-    const getCommand = new GetObjectCommand({
-      Bucket: process.env.S3_BUCKET!,
-      Key: document.fileKey,
-    });
-
-    const s3Response = await s3.send(getCommand);
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of s3Response.Body as any) {
-      chunks.push(chunk);
-    }
-    const fileBuffer = Buffer.concat(chunks);
-    const base64Content = fileBuffer.toString("base64");
-
-    const accessToken = await getGoogleAccessToken();
-    const { getGoogleCloudConfig } = await import("../lib/OCRData");
-    const config = getGoogleCloudConfig();
-    const { projectId, location, processorId } = config;
-
-    if (!projectId || !processorId) {
-      throw new Error("Missing GCP_PROJECT_ID or PROCESSOR_ID");
-    }
-
-    const endpoint = `https://${location}-documentai.googleapis.com/v1/projects/${projectId}/locations/${location}/processors/${processorId}:process`;
-
-    const requestBody = {
-      rawDocument: {
-        content: base64Content,
-        mimeType: document.fileType,
-      },
-      skipHumanReview: true,
-    };
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Document AI error: ${error}`);
-    }
-
-    const result: any = await response.json();
-    const doc = result.document;
-    
-    if (doc) {
-      const extractedText = doc.text || "";
-      await prisma.document.update({
-        where: { id: documentId },
-        data: {
-          extractedText: extractedText,
-          ocrProcessed: true,
+      where: { id },
+      include: {
+        translation: true,
+        flashcards: true,
+        customQuizzes: {
+          include: {
+            questions: true,
+          },
         },
-      });
-      console.log(`[Auto OCR] Completed for ${document.filename}, extracted ${extractedText.length} characters`);
+      },
+    });
+
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
     }
+
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    const hasTranslation = !!document.translation;
+    const flashcardCount = document.flashcards.length;
+    const hasFlashcards = flashcardCount > 0;
+    
+    const quiz = document.customQuizzes[0];
+    const questionCount = quiz?.questions.length || 0;
+    const hasQuiz = !!quiz && questionCount > 0;
+
+    let status: 'processing' | 'completed' | 'error' = 'processing';
+    
+    if (document.ocrProcessed && hasTranslation && hasFlashcards && hasQuiz) {
+      status = 'completed';
+    } else if (document.ocrProcessed === false) {
+      status = 'processing';
+    }
+
+    return c.json({
+      status: {
+        status,
+        hasTranslation,
+        hasFlashcards,
+        hasQuiz,
+        flashcardCount,
+        questionCount,
+        category: quiz?.category || null,
+      },
+       translation: document.translation,
+      document: {
+        id: document.id,
+        filename: document.filename,
+      }
+    });
   } catch (error) {
-    console.error(`[Auto OCR] Failed for ${documentId}:`, error);
+    console.error("Get document status error:", error);
+    return c.json({ error: String(error) }, 500);
   }
-}
+};
+
+export const getDocumentTranslation = async (c: Context) => {
+  try {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const translation = await prisma.documentTranslation.findUnique({
+      where: { documentId: id },
+      include: {
+        document: {
+          include: {
+            customQuizzes: {
+              include: {
+                questions: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!translation) {
+      const document = await prisma.document.findUnique({
+        where: { id },
+      });
+
+      if (!document) {
+        return c.json({ error: "Document not found" }, 404);
+      }
+
+      if (document.userId !== user.id) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+
+      return c.json({ 
+        translation: null,
+        processing: true,
+        message: "Translation is being generated. Please wait..."
+      });
+    }
+
+    if (translation.document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    return c.json({ translation });
+  } catch (error) {
+    console.error("Get document translation error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
 
 export const triggerOCR = async (c: Context) => {
   try {
@@ -298,148 +513,23 @@ export const triggerOCR = async (c: Context) => {
       return c.json({ error: "Forbidden" }, 403);
     }
 
-    console.log("=== Starting Google Document AI OCR ===");
-    console.log("Document ID:", document.id);
-    console.log("Filename:", document.filename);
-    console.log("File Type:", document.fileType);
-
-    const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-
-    if (!AllowedFileTypes.includes(document.fileType)) {
-      return c.json({ error: "Only PDF, JPG, and PNG files can be processed" }, 400);
+    console.log("=== Manual OCR Trigger ===");
+    
+    const { performOCR } = await import("./helperFunctions/documentHelper");
+    const extractedText = await performOCR(id, user.id);
+    
+    if (!extractedText) {
+      return c.json({ error: "OCR failed" }, 500);
     }
-
-    console.log("Downloading file from R2...");
-    const getCommand = new GetObjectCommand({
-      Bucket: process.env.S3_BUCKET!,
-      Key: document.fileKey,
-    });
-
-    const s3Response = await s3.send(getCommand);
-
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of s3Response.Body as any) {
-      chunks.push(chunk);
-    }
-    const fileBuffer = Buffer.concat(chunks);
-    console.log("File downloaded, size:", fileBuffer.length, "bytes");
-
-    const base64Content = fileBuffer.toString("base64");
-
-    console.log("Getting Google access token...");
-    const accessToken = await getGoogleAccessToken();
-
-    console.log("Processing with Google Document AI...");
-    const { getGoogleCloudConfig } = await import("../lib/OCRData");
-    const config = getGoogleCloudConfig();
-    const { projectId, location, processorId } = config;
-
-    if (!projectId || !processorId) {
-      throw new Error("Missing GCP_PROJECT_ID or PROCESSOR_ID in environment");
-    }
-
-    const endpoint = `https://${location}-documentai.googleapis.com/v1/projects/${projectId}/locations/${location}/processors/${processorId}:process`;
-
-    const requestBody = {
-      rawDocument: {
-        content: base64Content,
-        mimeType: document.fileType,
-      },
-      skipHumanReview: true,
-    };
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": document.fileType,
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Document AI error: ${error}`);
-    }
-
-    const result: any = await response.json();
-
-    const doc = result.document;
-    if (!doc) {
-      throw new Error("Invalid response from Document AI");
-    }
-
-    const extractedText = doc.text || "";
-    const pagesCount = doc.pages?.length || 0;
-
-    console.log("Document AI Response:", {
-      textLength: extractedText.length,
-      pagesCount,
-    });
-
-    const pages: Array<{ pageNumber: number; text: string }> = [];
-    if (doc.pages) {
-      doc.pages.forEach((page: any, index: number) => {
-        const pageText = extractPageText(extractedText, page);
-        pages.push({
-          pageNumber: index + 1,
-          text: pageText,
-        });
-      });
-    }
-
-    const updatedDocument = await prisma.document.update({
-      where: { id },
-      data: {
-        extractedText: extractedText,
-        ocrProcessed: true,
-      },
-    });
-
-    console.log("Document updated with OCR results");
-    console.log("Total extracted text length:", extractedText.length);
-    console.log("Pages processed:", pagesCount);
-    console.log("Text preview:", extractedText.substring(0, 200));
-
-    console.log("=== OCR Processing Complete ===");
 
     return c.json({
-      message: "OCR processing completed successfully",
-      extractedText:
-        extractedText.substring(0, 500) +
-        (extractedText.length > 500 ? "..." : ""),
+      message: "OCR completed",
+      extractedText: extractedText.substring(0, 500) + (extractedText.length > 500 ? "..." : ""),
       textLength: extractedText.length,
-      pagesCount: pagesCount,
-      document: updatedDocument,
     });
   } catch (error) {
-    console.error("=== OCR Processing Error ===");
-    console.error(error);
-    return c.json(
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-      500
-    );
+    console.error("OCR trigger error:", error);
+    return c.json({ error: String(error) }, 500);
   }
 };
 
-function extractPageText(fullText: string, page: any): string {
-  if (!page.layout || !page.layout.textAnchor) {
-    return "";
-  }
-
-  const textAnchor = page.layout.textAnchor;
-  if (!textAnchor.textSegments) {
-    return "";
-  }
-
-  let pageText = "";
-  textAnchor.textSegments.forEach((segment: any) => {
-    const startIndex = parseInt(segment.startIndex || "0");
-    const endIndex = parseInt(segment.endIndex || fullText.length);
-    pageText += fullText.substring(startIndex, endIndex);
-  });
-
-  return pageText;
-}
