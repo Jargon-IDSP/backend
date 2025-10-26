@@ -4,7 +4,6 @@ import { app } from "./app";
 import { initializeCache } from "./controllers/flashcardController";
 
 
-
 const port = +(process.env.PORT || 8080);
 
 serve({
