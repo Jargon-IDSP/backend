@@ -45,4 +45,4 @@ app.route("/quiz-shares", quizShareRoute);
 app.route("/weekly-tracking", weeklyStatsRoute);
 
 
-await initializeCache();
+// await initializeCache();
