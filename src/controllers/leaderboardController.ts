@@ -3,7 +3,6 @@ import { prisma } from '../lib/prisma';
 
 export const getLeaderboard = async (c: Context) => {
   try {
-    // Get all users ordered by score (highest first)
     const users = await prisma.user.findMany({
       select: {
         id: true,

@@ -1,7 +1,6 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
 
-// Share a custom quiz with a friend
 export const shareQuiz = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -12,7 +11,6 @@ export const shareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "Missing customQuizId or friendUserId" }, 400);
     }
 
-    // Verify the quiz belongs to the user
     const quiz = await prisma.customQuiz.findUnique({
       where: { id: customQuizId },
     });
@@ -25,7 +23,6 @@ export const shareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    // Verify they are friends
     const friendship = await prisma.friendship.findFirst({
       where: {
         AND: [
@@ -44,7 +41,6 @@ export const shareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "You can only share quizzes with friends" }, 403);
     }
 
-    // Check if already shared
     const existingShare = await prisma.customQuizShare.findUnique({
       where: {
         customQuizId_sharedWithUserId: {
@@ -58,7 +54,6 @@ export const shareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "Quiz already shared with this user" }, 400);
     }
 
-    // Create the share
     const share = await prisma.customQuizShare.create({
       data: {
         customQuizId,
@@ -95,7 +90,6 @@ export const shareQuiz = async (c: Context) => {
   }
 };
 
-// Unshare a quiz
 export const unshareQuiz = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -113,7 +107,6 @@ export const unshareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "Share not found" }, 404);
     }
 
-    // Only the quiz owner can unshare
     if (share.customQuiz.userId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
@@ -129,14 +122,12 @@ export const unshareQuiz = async (c: Context) => {
   }
 };
 
-// Get all users a quiz is shared with
 export const getQuizShares = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
     const customQuizId = c.req.param("quizId");
 
-    // Verify the quiz belongs to the user
     const quiz = await prisma.customQuiz.findUnique({
       where: { id: customQuizId },
     });
@@ -174,7 +165,6 @@ export const getQuizShares = async (c: Context) => {
   }
 };
 
-// Get all quizzes shared with the current user
 export const getSharedWithMe = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -211,7 +201,6 @@ export const getSharedWithMe = async (c: Context) => {
   }
 };
 
-// Get all my quizzes and who they're shared with
 export const getMySharedQuizzes = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -251,7 +240,6 @@ export const getMySharedQuizzes = async (c: Context) => {
   }
 };
 
-// Share with multiple friends at once
 export const shareWithMultiple = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -262,7 +250,6 @@ export const shareWithMultiple = async (c: Context) => {
       return c.json({ success: false, error: "Missing customQuizId or friendUserIds" }, 400);
     }
 
-    // Verify the quiz belongs to the user
     const quiz = await prisma.customQuiz.findUnique({
       where: { id: customQuizId },
     });
@@ -275,7 +262,6 @@ export const shareWithMultiple = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    // Get all friends
     const friendships = await prisma.friendship.findMany({
       where: {
         AND: [
@@ -294,14 +280,12 @@ export const shareWithMultiple = async (c: Context) => {
       f.requesterId === userId ? f.addresseeId : f.requesterId
     );
 
-    // Filter out users who aren't friends
     const validFriendIds = friendUserIds.filter((id) => friendIds.includes(id));
 
     if (validFriendIds.length === 0) {
       return c.json({ success: false, error: "None of the specified users are your friends" }, 400);
     }
 
-    // Create shares (skip duplicates)
     const shares = await Promise.all(
       validFriendIds.map(async (friendId) => {
         try {
@@ -312,7 +296,6 @@ export const shareWithMultiple = async (c: Context) => {
             },
           });
         } catch (error: any) {
-          // Skip if already shared (unique constraint violation)
           if (error.code === "P2002") {
             return null;
           }

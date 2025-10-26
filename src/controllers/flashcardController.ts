@@ -473,7 +473,6 @@ export const getCustomFlashcardsByUser = async (c: Context) => {
 
       console.log(`Found ${flashcards.length} custom flashcards for user ${userId}`);
 
-      // Return empty array if no flashcards found - this is not an error
       const displayFlashcards = flashcards.map((card: any) =>
         enrichCustomFlashcard(card, language)
       );
@@ -546,10 +545,8 @@ export const getCustomFlashcardsByCategory = async (c: Context) => {
       return errorResponse(c, "Category is required", 400);
     }
 
-    // Convert category string to match enum format (capitalize first letter)
     const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
 
-    // Find all quizzes with this category
     const quizzes = await prisma.customQuiz.findMany({
       where: {
         userId: user.id,
@@ -568,7 +565,6 @@ export const getCustomFlashcardsByCategory = async (c: Context) => {
 
     const quizIds = quizzes.map(q => q.id);
 
-    // Find all flashcards through questions that belong to these quizzes
     const questions = await prisma.customQuestion.findMany({
       where: {
         userId: user.id,
@@ -626,30 +622,3 @@ export const getCustomFlashcardsByCategory = async (c: Context) => {
   }
 };
 
-// Cache management controllers
-
-export const clearCache = async (c: Context) => {
-  try {
-    clearAllCache();
-    return c.json({
-      success: true,
-      message: "Cache cleared successfully",
-    });
-  } catch (error) {
-    console.error("Error clearing cache:", error);
-    return errorResponse(c, "Failed to clear cache");
-  }
-};
-
-export const getCacheStats = async (c: Context) => {
-  try {
-    const stats = getCacheStatistics();
-    return c.json({
-      success: true,
-      stats,
-    });
-  } catch (error) {
-    console.error("Error getting cache stats:", error);
-    return errorResponse(c, "Failed to get cache stats");
-  }
-};

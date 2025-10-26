@@ -126,21 +126,18 @@ ${ocrText.slice(0, 3000)}
     "General",
   ];
 
-  // Try exact match first
   for (const category of validCategories) {
     if (normalized === category) {
       return category as QuizCategory;
     }
   }
 
-  // Try case-insensitive match
   for (const category of validCategories) {
     if (normalized.toLowerCase() === category.toLowerCase()) {
       return category as QuizCategory;
     }
   }
 
-  // Try partial match
   for (const category of validCategories) {
     if (normalized.toLowerCase().includes(category.toLowerCase())) {
       return category as QuizCategory;

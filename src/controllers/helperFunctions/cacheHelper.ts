@@ -77,3 +77,4 @@ export const getCacheStatistics = () => {
     hitRate: stats.hits / (stats.hits + stats.misses) || 0,
   };
 };
+

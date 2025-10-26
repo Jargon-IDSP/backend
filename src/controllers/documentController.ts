@@ -8,11 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 
-// ============================================================================
-// HELPER FUNCTIONS FOR DOCUMENT PROCESSING
-// ============================================================================
 
-// SYNCHRONOUS: Extract text with OCR only (wait for completion)
 async function extractTextWithOCR(documentId: string, userId: string): Promise<string | null> {
   try {
     console.log(`\n${'='.repeat(60)}`);
@@ -39,7 +35,6 @@ async function extractTextWithOCR(documentId: string, userId: string): Promise<s
   }
 }
 
-// ASYNCHRONOUS: Translate document in background
 async function translateDocument(documentId: string, userId: string, extractedText: string) {
   try {
     console.log(`\n${'='.repeat(60)}`);
@@ -48,7 +43,6 @@ async function translateDocument(documentId: string, userId: string, extractedTe
     
     const { translateFullDocument } = await import("./helperFunctions/documentHelper");
     
-    // Translate to all languages
     console.log('🌐 Translating to all languages...');
     const translationData = await translateFullDocument(extractedText, documentId, userId);
     await prisma.documentTranslation.create({ data: translationData });

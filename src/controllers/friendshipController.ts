@@ -1,7 +1,6 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
 
-// Send friend request
 export const sendFriendRequest = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -16,7 +15,6 @@ export const sendFriendRequest = async (c: Context) => {
       return c.json({ success: false, error: "Cannot send friend request to yourself" }, 400);
     }
 
-    // Check if addressee exists
     const addressee = await prisma.user.findUnique({
       where: { id: addresseeId },
     });
@@ -25,7 +23,6 @@ export const sendFriendRequest = async (c: Context) => {
       return c.json({ success: false, error: "User not found" }, 404);
     }
 
-    // Check if friendship already exists
     const existingFriendship = await prisma.friendship.findFirst({
       where: {
         OR: [
@@ -42,7 +39,6 @@ export const sendFriendRequest = async (c: Context) => {
       return c.json({ success: false, error: "Friend request already sent" }, 400);
     }
 
-    // Create friendship
     const friendship = await prisma.friendship.create({
       data: {
         requesterId: userId,
@@ -58,7 +54,6 @@ export const sendFriendRequest = async (c: Context) => {
   }
 };
 
-// Accept friend request
 export const acceptFriendRequest = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -73,7 +68,6 @@ export const acceptFriendRequest = async (c: Context) => {
       return c.json({ success: false, error: "Friendship not found" }, 404);
     }
 
-    // Only the addressee can accept
     if (friendship.addresseeId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
@@ -94,7 +88,6 @@ export const acceptFriendRequest = async (c: Context) => {
   }
 };
 
-// Reject friend request
 export const rejectFriendRequest = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -109,7 +102,6 @@ export const rejectFriendRequest = async (c: Context) => {
       return c.json({ success: false, error: "Friendship not found" }, 404);
     }
 
-    // Only the addressee can reject
     if (friendship.addresseeId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
@@ -125,7 +117,6 @@ export const rejectFriendRequest = async (c: Context) => {
   }
 };
 
-// Remove friend
 export const removeFriend = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -140,7 +131,6 @@ export const removeFriend = async (c: Context) => {
       return c.json({ success: false, error: "Friendship not found" }, 404);
     }
 
-    // Either user can remove the friendship
     if (friendship.requesterId !== userId && friendship.addresseeId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
@@ -156,7 +146,6 @@ export const removeFriend = async (c: Context) => {
   }
 };
 
-// Get friends list
 export const getFriends = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -198,7 +187,6 @@ export const getFriends = async (c: Context) => {
       },
     });
 
-    // Map to return the friend (not the current user)
     const friends = friendships.map((friendship) => {
       const friend = friendship.requesterId === userId ? friendship.addressee : friendship.requester;
       return {
@@ -214,7 +202,6 @@ export const getFriends = async (c: Context) => {
   }
 };
 
-// Get pending requests (received)
 export const getPendingRequests = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -255,7 +242,6 @@ export const getPendingRequests = async (c: Context) => {
   }
 };
 
-// Get sent requests
 export const getSentRequests = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -296,7 +282,6 @@ export const getSentRequests = async (c: Context) => {
   }
 };
 
-// Search users
 export const searchUsers = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -307,11 +292,10 @@ export const searchUsers = async (c: Context) => {
       return c.json({ success: false, error: "Search query must be at least 2 characters" }, 400);
     }
 
-    // Search users by username or email
     const users = await prisma.user.findMany({
       where: {
         AND: [
-          { id: { not: userId } }, // Exclude current user
+          { id: { not: userId } }, 
           {
             OR: [
               { username: { contains: query } },
@@ -333,7 +317,6 @@ export const searchUsers = async (c: Context) => {
       take: 10,
     });
 
-    // Get friendship status for each user
     const userIds = users.map((u) => u.id);
     const friendships = await prisma.friendship.findMany({
       where: {

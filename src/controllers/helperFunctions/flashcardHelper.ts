@@ -243,3 +243,29 @@ export async function getFlashcardAllLanguages(id: string) {
     level: flashcard.level?.name || null,
   };
 }
+
+export const clearCache = async (c: Context) => {
+  try {
+    clearAllCache();
+    return c.json({
+      success: true,
+      message: "Cache cleared successfully",
+    });
+  } catch (error) {
+    console.error("Error clearing cache:", error);
+    return errorResponse(c, "Failed to clear cache");
+  }
+};
+
+export const getCacheStats = async (c: Context) => {
+  try {
+    const stats = getCacheStatistics();
+    return c.json({
+      success: true,
+      stats,
+    });
+  } catch (error) {
+    console.error("Error getting cache stats:", error);
+    return errorResponse(c, "Failed to get cache stats");
+  }
+};

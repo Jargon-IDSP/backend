@@ -8,10 +8,8 @@ import {
 
 export const chatRoute = new Hono();
 
-// Public endpoint - no auth required
 chatRoute.get("/", getChatStatus);
 
-// All routes below require auth
 chatRoute.use('*', authMiddleware);
 
 chatRoute.get("/user", getChatUser);

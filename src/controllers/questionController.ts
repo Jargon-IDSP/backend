@@ -335,7 +335,6 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
       return errorResponse(c, "User not authenticated", 401);
     }
 
-    // First check if user owns the document
     const document = await prisma.document.findUnique({
       where: { id: documentId },
       select: { userId: true },
@@ -350,7 +349,6 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
     const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId, isOwner });
 
     const response = await withCache(cacheKey, async () => {
-      // Get all quizzes for this document
       const quizzes = await prisma.customQuiz.findMany({
         where: isOwner ? {
           documentId,

@@ -105,7 +105,7 @@ export const formatChoices = (
   
   return shuffledChoices.map((choice, index) => ({
     ...choice,
-    id: String.fromCharCode(65 + index), // A, B, C, D
+    id: String.fromCharCode(65 + index), 
   }));
 };
 
@@ -159,19 +159,17 @@ export const enrichQuestionWithChoices = async (
   const result: any = {
     questionId: question.id,
     prompt: getPromptForLanguage(question, language),
-    prompts: getAllPromptsIndexed(question), // All language versions indexed
+    prompts: getAllPromptsIndexed(question), 
     choices,
     language,
     correctAnswerId: question.correctTermId,
   };
 
-  // Only add difficulty and tags for prebuilt questions
   if (!isCustom) {
     result.difficulty = question.difficulty;
     result.tags = typeof question.tags === 'string' ? JSON.parse(question.tags) : question.tags;
   }
 
-  // Add pointsWorth for custom questions
   if (isCustom && question.pointsWorth) {
     result.pointsWorth = question.pointsWorth;
   }

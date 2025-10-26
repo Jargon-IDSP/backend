@@ -23,14 +23,12 @@ export const handleClerkWebhook = async (c: Context) => {
     const environment = process.env.NODE_ENV || 'development';
     console.log(`Webhook received (${environment})`);
     
-    // Validate webhook secret
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
     if (!WEBHOOK_SECRET) {
       console.error("CLERK_WEBHOOK_SECRET not configured");
       return c.json({ error: "Webhook secret not configured" }, 500);
     }
 
-    // Get required headers
     const svix_id = c.req.header("svix-id");
     const svix_timestamp = c.req.header("svix-timestamp");
     const svix_signature = c.req.header("svix-signature");
@@ -40,7 +38,6 @@ export const handleClerkWebhook = async (c: Context) => {
       return c.json({ error: "Missing svix headers" }, 400);
     }
 
-    // Verify webhook signature
     const body = await c.req.text();
     const wh = new Webhook(WEBHOOK_SECRET);
 
@@ -57,7 +54,6 @@ export const handleClerkWebhook = async (c: Context) => {
       return c.json({ error: "Invalid webhook signature" }, 400);
     }
 
-    // Process webhook event
     const eventType = evt.type;
     console.log(`Processing: ${eventType}`);
 
@@ -91,7 +87,6 @@ async function handleUserCreated(userData: ClerkUserData) {
   try {
     console.log(`Creating user: ${userData.id}`);
 
-    // Get primary email
     const primaryEmail = userData.email_addresses?.find(
       (email) => email.id === userData.primary_email_address_id
     )?.email_address;
@@ -110,7 +105,6 @@ async function handleUserCreated(userData: ClerkUserData) {
       return;
     }
 
-    // Create new user
     const newUser = await prisma.user.create({
       data: {
         id: userData.id,

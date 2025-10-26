@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { getGoogleAccessToken, getGoogleCloudConfig } from '../lib/OCRData';
-import type { OCRPage, OCRResult } from '../interfaces/OCRInterfaces';
+import type { OCRPage, OCRResult } from '../interfaces/documentInterfaces';
 
 const AllowedFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
 const MaxFileSize = 20 * 1024 * 1024;

@@ -189,7 +189,6 @@ export function getQuestionSelect(userLanguage: Langs = "english") {
   return {
     id: true,
     correctTermId: true,
-    // Include ALL language prompt fields for translation
     promptEnglish: true,
     promptFrench: true,
     promptChinese: true,
@@ -209,7 +208,6 @@ export function getCustomQuestionSelect(userLanguage: Langs = "english") {
   return {
     id: true,
     correctTermId: true,
-    // Include ALL language prompt fields for translation
     promptEnglish: true,
     promptFrench: true,
     promptChinese: true,

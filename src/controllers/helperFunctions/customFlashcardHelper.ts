@@ -225,7 +225,6 @@ export function filterAndFillQuestions(
   let qEnglish = (questions || [])
     .filter((q) => kept.has((q.correctEnglish || "").trim().toLowerCase()))
     .map((q) => {
-      // Find the corresponding term to get its category
       const term = terms.find(t => t.english.toLowerCase() === q.correctEnglish.trim().toLowerCase());
       return {
         ...q,
