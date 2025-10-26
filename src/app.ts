@@ -36,12 +36,6 @@ app.get("/", (c) => {
   return c.json({ 
     status: "ok", 
     message: "Jargon Backend API",
-    endpoints: {
-      leaderboard: "/leaderboard",
-      learning: "/learning",
-      profile: "/profile",
-      chat: "/chat"
-    }
   });
 });
 

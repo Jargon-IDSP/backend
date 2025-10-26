@@ -62,6 +62,11 @@ async function syncUserToDatabase(clerkUser: any) {
 }
 
 export const authMiddleware = async (c: Context, next: Next) => {
+
+    if (c.req.method === "OPTIONS") {
+    return next();
+  }
+
   console.log("🔒 AUTH MIDDLEWARE CALLED");
   console.log("Path:", c.req.path);
   console.log("Method:", c.req.method);
