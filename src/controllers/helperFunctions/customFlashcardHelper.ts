@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
+import { prisma } from "../../lib/prisma";
 import type {
   Langs,
   QuizCategory,
@@ -13,8 +14,96 @@ import type {
   CustomQuestionData,
 } from "../../interfaces/customFlashcard";
 import type { CustomQuizData } from "../../interfaces/quizData";
+import {
+  MODEL,
+  extractResponseText,
+  parseJSONResponse,
+} from "./aiHelper";
+import {
+  normalizeLanguage,
+  getLanguageFieldName,
+  getAllLanguageFields,
+  getLanguageSelect,
+  convertToDisplayFormat,
+} from "./translationHelper";
 
-const MODEL = "gemini-flash-latest";
+export { normalizeLanguage, getLanguageFieldName, getAllLanguageFields };
+
+export function getCustomFlashcardSelect(userLanguage: Langs = "english") {
+  return getLanguageSelect(userLanguage, {
+    id: true,
+    documentId: true,
+    userId: true,
+    createdAt: true,
+    updatedAt: true,
+  });
+}
+
+export const convertCustomToDisplayFormat = (dbFlashcard: any, language?: string) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { language },
+    {
+      documentId: dbFlashcard.documentId,
+      userId: dbFlashcard.userId,
+    }
+  );
+};
+
+
+export const convertCustomToDisplayFormatAllLanguages = (dbFlashcard: any) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { includeAllLanguages: true },
+    {
+      documentId: dbFlashcard.documentId,
+      userId: dbFlashcard.userId,
+    }
+  );
+};
+
+
+export const enrichCustomFlashcard = (flashcard: any, language?: string) => {
+  const lang = language?.toLowerCase() || 'english';
+  
+  return {
+    ...convertCustomToDisplayFormat(flashcard, lang),
+    document: flashcard.document
+      ? {
+          id: flashcard.document.id,
+          filename: flashcard.document.filename,
+          fileUrl: flashcard.document.fileUrl,
+        }
+      : null,
+  };
+};
+
+export async function getCustomFlashcardAllLanguages(id: string) {
+  const flashcard = await prisma.customFlashcard.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      ...getAllLanguageFields(),
+      documentId: true,
+      userId: true,
+      document: {
+        select: {
+          id: true,
+          filename: true,
+          fileUrl: true,
+        }
+      }
+    },
+  });
+
+  if (!flashcard) return null;
+  
+  return {
+    ...convertCustomToDisplayFormatAllLanguages(flashcard),
+    document: flashcard.document,
+  };
+}
+
 
 export function formatCustomId(prefix: "C" | "cq", n: number): string {
   return `${prefix}-${n}`;
@@ -26,23 +115,6 @@ export function makeDedupSet(words: string[]): Set<string> {
   return s;
 }
 
-export function parseModelJSON<T>(responseText: string): T {
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    const m = responseText.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("Model did not return valid JSON.");
-    return JSON.parse(m[0]);
-  }
-}
-
-export function extractResponseText(response: any): string {
-  return (
-    response.text ??
-    response.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || "").join("") ??
-    ""
-  );
-}
 
 export async function extractTermsAndQuestions(
   ai: GoogleGenAI,
@@ -82,7 +154,7 @@ OCR:
   });
 
   const extractionText = extractResponseText(extractionResp);
-  return parseModelJSON<ExtractionResponse>(extractionText);
+  return parseJSONResponse<ExtractionResponse>(extractionText);
 }
 
 export async function translateTermsAndQuestions(
@@ -117,7 +189,7 @@ SOURCE:
   });
 
   const translateText = extractResponseText(translateResp);
-  return parseModelJSON<TranslationResponse>(translateText);
+  return parseJSONResponse<TranslationResponse>(translateText);
 }
 
 export function cleanAndDeduplicateTerms(

@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "gemini-flash-latest";
+export const MODEL = "gemini-flash-latest";
 
 
 function getAIClient() {
@@ -11,13 +11,14 @@ function getAIClient() {
 }
 
 
-function extractResponseText(response: any): string {
+export function extractResponseText(response: any): string {
   return (
     response.text ??
     response.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || "").join("") ??
     ""
   );
 }
+
 
 export function parseJSONResponse<T>(responseText: string): T {
   try {
@@ -43,4 +44,73 @@ export async function callGenAI(prompt: string): Promise<string> {
 export async function callGenAIForJSON<T>(prompt: string): Promise<T> {
   const responseText = await callGenAI(prompt);
   return parseJSONResponse<T>(responseText);
+}
+
+
+export function extractChunkText(chunk: any): string {
+  return (
+    chunk.text ??
+    chunk.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text || "")
+      .join("") ??
+    ""
+  );
+}
+
+
+export async function createAIStream(prompt: string, model: string = MODEL) {
+  const ai = getAIClient();
+  
+  const stream = await ai.models.generateContentStream({
+    model,
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+  });
+
+  const encoder = new TextEncoder();
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const chunk of stream) {
+          const text = extractChunkText(chunk);
+          if (text) {
+            controller.enqueue(encoder.encode(text));
+          }
+        }
+      } catch (err) {
+        console.error("Stream error:", err);
+        controller.enqueue(encoder.encode("\n[Stream error occurred]\n"));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
+
+export function getStreamingHeaders() {
+  return {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "X-Content-Type-Options": "nosniff",
+  };
+}
+
+
+export function validateChatRequest(body: any): { 
+  valid: boolean; 
+  prompt?: string; 
+  error?: string;
+} {
+  const prompt = body?.prompt as string;
+  
+  if (!prompt || typeof prompt !== "string") {
+    return { valid: false, error: "Prompt is required" };
+  }
+  
+  if (!prompt.trim()) {
+    return { valid: false, error: "Prompt cannot be empty" };
+  }
+  
+  return { valid: true, prompt: prompt.trim() };
 }

@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import { chatRoute } from "./routes/chatRoute";
-import { helpRoute } from "./routes/helpRoute";
 import { profileRoute } from "./routes/profileRoute";
 import { initializeCache } from "./controllers/flashcardController";
 import { documentRoute } from "./routes/documentRoute";
@@ -12,6 +11,8 @@ import { learningRoute } from "./routes/learningRoute";
 import { ocrRoute } from "./routes/ocrRoute";
 import quizRoute from "./routes/quizRoute";
 import friendshipRoute from "./routes/friendshipRoute";
+import quizShareRoute from "./routes/quizShareRoute";
+import weeklyStatsRoute from "./routes/weeklyStatsRoute";
 
 export const app = new Hono();
 
@@ -32,7 +33,6 @@ app.use(
 );
 
 app.route("/chat", chatRoute);
-app.route("/help", helpRoute);
 app.route("/profile", profileRoute);
 app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
@@ -41,6 +41,8 @@ app.route("/learning", learningRoute);
 app.route("/ocr", ocrRoute);
 app.route("/quiz", quizRoute);
 app.route("/friendships", friendshipRoute);
+app.route("/quiz-shares", quizShareRoute);
+app.route("/weekly-tracking", weeklyStatsRoute);
 
 
 await initializeCache();

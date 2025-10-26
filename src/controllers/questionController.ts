@@ -24,7 +24,6 @@ import {
 
 import { prisma } from '../lib/prisma';
 
-// Existing Questions
 
 export const getQuestionsByLevel = async (c: Context) => {
   try {
@@ -295,26 +294,21 @@ export const getQuizzesByLevel = async (c: Context) => {
     const cacheKey = generateCacheKey("quizzes-level", { levelId, userId });
 
     const response = await withCache(cacheKey, async () => {
-      const quizzes = await prisma.quiz.findMany({
+      const quizAttempts = await prisma.userQuizAttempt.findMany({
         where: {
           levelId: parseInt(levelId),
           userId,
         },
         include: {
           level: true,
-          questions: {
-            include: {
-              correctAnswer: true,
-            },
-          },
         },
         orderBy: {
-          createdAt: 'desc',
+          startedAt: 'desc',
         },
       });
 
-      return successResponse(quizzes, {
-        count: quizzes.length,
+      return successResponse(quizAttempts, {
+        count: quizAttempts.length,
         level_id: levelId,
         user_id: userId,
       });
@@ -341,19 +335,44 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
       return errorResponse(c, "User not authenticated", 401);
     }
 
-    const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId });
+    // First check if user owns the document
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { userId: true },
+    });
+
+    if (!document) {
+      return errorResponse(c, "Document not found", 404);
+    }
+
+    const isOwner = document.userId === userId;
+
+    const cacheKey = generateCacheKey("custom-quizzes-document", { documentId, userId, isOwner });
 
     const response = await withCache(cacheKey, async () => {
+      // Get all quizzes for this document
       const quizzes = await prisma.customQuiz.findMany({
-        where: {
+        where: isOwner ? {
           documentId,
           userId,
+        } : {
+          documentId,
+          sharedWith: {
+            some: {
+              sharedWithUserId: userId,
+            },
+          },
         },
         include: {
-          document: true,
-          questions: {
-            include: {
-              correctAnswer: true,
+          document: {
+            select: {
+              id: true,
+              filename: true,
+            },
+          },
+          _count: {
+            select: {
+              questions: true,
             },
           },
         },
@@ -366,6 +385,7 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
         count: quizzes.length,
         document_id: documentId,
         user_id: userId,
+        is_owner: isOwner,
       });
     });
 
@@ -428,7 +448,6 @@ export const getCustomQuestionsByCategory = async (c: Context) => {
       return errorResponse(c, "Category is required", 400);
     }
 
-    // Convert category string to match enum format
     const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
 
     const questions = await prisma.customQuestion.findMany({
@@ -470,7 +489,6 @@ export const getCustomQuizzesByCategory = async (c: Context) => {
       return errorResponse(c, "Category is required", 400);
     }
 
-    // Convert category string to match enum format
     const categoryEnum = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
 
     const quizzes = await prisma.customQuiz.findMany({
@@ -539,7 +557,6 @@ export const getCustomQuizById = async (c: Context) => {
       return errorResponse(c, "Quiz has no questions", 404);
     }
 
-    // Enrich questions with multiple choice options
     const enrichedQuestions = await Promise.all(
       quiz.questions.map(async (q) => 
         await enrichQuestionWithChoices(prisma, q, lang, true)
@@ -709,7 +726,6 @@ export const generateCustomQuiz = async (c: Context) => {
   }
 };
 
-// Complete Quiz and Update Points
 export const completeQuiz = async (c: Context) => {
   try {
     const user = c.get('user');
@@ -726,36 +742,35 @@ export const completeQuiz = async (c: Context) => {
       return errorResponse(c, 'Missing required fields: type, score, totalQuestions', 400);
     }
 
-    const pointsEarned = score * 5; // 5 points per correct answer
+    const pointsEarned = score * 5; 
     console.log('Points earned:', pointsEarned);
 
     if (type === 'existing') {
-      // For existing quizzes, we need a valid quiz ID and level ID
       if (!quizId || !requestLevelId) {
         return errorResponse(c, 'Missing quizId or levelId for existing quiz', 400);
       }
 
-      // Update or create existing quiz record
-      const quiz = await prisma.quiz.upsert({
-        where: { id: quizId },
-        update: {
-          completed: true,
-          score: pointsEarned,
-          completedAt: new Date(),
-        },
-        create: {
-          id: quizId,
+      const percentCorrect = Math.round((score / totalQuestions) * 100);
+
+      const quizAttempt = await prisma.userQuizAttempt.create({
+        data: {
+          id: quizId, 
           userId,
           levelId: parseInt(requestLevelId),
+          questionsAnswered: totalQuestions,
+          questionsCorrect: score,
+          totalQuestions,
+          percentComplete: 100,
+          percentCorrect,
+          pointsEarned,
+          maxPossiblePoints: totalQuestions * 5,
           completed: true,
-          score: pointsEarned,
           completedAt: new Date(),
         },
       });
 
-      console.log('Created/updated existing quiz:', quiz);
+      console.log('Created quiz attempt for prebuilt quiz:', quizAttempt);
 
-      // Update user's score
       await prisma.user.update({
         where: { id: userId },
         data: {
@@ -765,7 +780,6 @@ export const completeQuiz = async (c: Context) => {
         },
       });
 
-      // Update weekly stats
       const now = new Date();
       const dayOfWeek = now.getUTCDay();
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
@@ -793,14 +807,12 @@ export const completeQuiz = async (c: Context) => {
       });
 
       console.log('Updated user score and weekly stats');
-      return c.json(successResponse({ quiz, pointsEarned }));
+      return c.json(successResponse({ quizAttempt, pointsEarned }));
     } else if (type === 'custom') {
-      // For custom quizzes, create a UserQuizAttempt record
       const percentCorrect = Math.round((score / totalQuestions) * 100);
       
       let attempt = null;
       
-      // Check if quizId is provided and is a valid CustomQuiz ID
       if (quizId) {
         console.log('Checking for custom quiz with ID:', quizId);
         const customQuiz = await prisma.customQuiz.findUnique({
@@ -809,7 +821,6 @@ export const completeQuiz = async (c: Context) => {
 
         if (customQuiz) {
           console.log('Found custom quiz, creating attempt');
-          // Create quiz attempt for existing custom quiz
           attempt = await prisma.userQuizAttempt.create({
             data: {
               userId,
@@ -820,7 +831,7 @@ export const completeQuiz = async (c: Context) => {
               percentComplete: 100,
               percentCorrect,
               pointsEarned,
-              maxPossiblePoints: totalQuestions * 10, // Assuming 10 points per question
+              maxPossiblePoints: totalQuestions * 10,
               completed: true,
               completedAt: new Date(),
             },
@@ -832,8 +843,6 @@ export const completeQuiz = async (c: Context) => {
       } else {
         console.log('No quizId provided for custom quiz');
       }
-
-      // Update user's score regardless of whether we created an attempt
       console.log('Updating user score...');
       const updatedUser = await prisma.user.update({
         where: { id: userId },
@@ -845,7 +854,6 @@ export const completeQuiz = async (c: Context) => {
       });
       console.log('Updated user score. New score:', updatedUser.score);
 
-      // Update weekly stats
       const now = new Date();
       const dayOfWeek = now.getUTCDay();
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;

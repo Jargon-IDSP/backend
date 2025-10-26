@@ -65,7 +65,6 @@ async function translateDocument(documentId: string, userId: string, extractedTe
   }
 }
 
-// ASYNCHRONOUS: Generate flashcards and questions in background
 async function generateFlashcardsAndQuestions(documentId: string, userId: string) {
   try {
     console.log(`\n${'='.repeat(60)}`);
@@ -82,7 +81,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
     
     const { generateCustomFromOCR } = await import("./helperFunctions/customFlashcardHelper");
     
-    // Get the document and its extracted text
     const document = await prisma.document.findUnique({ 
       where: { id: documentId },
       select: { 
@@ -97,7 +95,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
       return;
     }
 
-    // Get category from translation
     const translation = await prisma.documentTranslation.findUnique({
       where: { documentId },
       select: { textEnglish: true }
@@ -118,7 +115,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
       existingDbTermsEnglish,
     });
 
-    // Default to General category (user can change later)
     const quizData = createQuizData(documentId, userId, document.filename);
     const flashcardData = transformToFlashcardData(generation.terms, documentId, userId);
     const indexToIdMap = createIndexToIdMap(flashcardData);
@@ -129,7 +125,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
       userId
     );
 
-    // Save all data in transaction
     await prisma.$transaction([
       prisma.customQuiz.create({ data: quizData }),
       ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
@@ -138,7 +133,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
 
     console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`);
     
-    // Mark document as fully processed
     await prisma.document.update({
       where: { id: documentId },
       data: { ocrProcessed: true }
@@ -152,7 +146,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
     console.error(`❌ Flashcard generation failed for ${documentId}:`, error);
     console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
     
-    // Mark as processed even on error to prevent retry loops
     try {
       await prisma.document.update({
         where: { id: documentId },
@@ -163,10 +156,6 @@ async function generateFlashcardsAndQuestions(documentId: string, userId: string
     }
   }
 }
-
-// ============================================================================
-// CONTROLLER FUNCTIONS
-// ============================================================================
 
 
 export const getUploadUrl = async (c: Context) => {
@@ -222,19 +211,15 @@ export const saveDocument = async (c: Context) => {
       console.log(`🚀 Starting OCR extraction for ${filename}`);
       
       try {
-        // STEP 1: Extract text with OCR (SYNCHRONOUS - wait for this ONLY)
         const extractedText = await extractTextWithOCR(document.id, user.id);
         
         if (extractedText) {
           console.log(`✅ OCR completed for ${document.id}`);
           
-          // STEP 2 & 3: Translation + Flashcards (ASYNCHRONOUS - background)
-          // This will continue even if user navigates away
           setImmediate(() => {
             translateDocument(document.id, user.id, extractedText)
               .then(() => {
                 console.log(`✅ Translation completed for ${document.id}`);
-                // Generate flashcards AFTER translation completes
                 return generateFlashcardsAndQuestions(document.id, user.id);
               })
               .then(() => {
@@ -249,7 +234,6 @@ export const saveDocument = async (c: Context) => {
         }
       } catch (error) {
         console.error(`❌ OCR extraction error for ${document.id}:`, error);
-        // Continue to return document even if OCR fails
       }
     }
 
@@ -489,7 +473,6 @@ export const getDocumentTranslation = async (c: Context) => {
         return c.json({ error: "Forbidden" }, 403);
       }
 
-      // Translation is being processed in background
       return c.json({ 
         translation: null,
         processing: true,

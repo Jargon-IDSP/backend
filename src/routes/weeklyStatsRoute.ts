@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { authMiddleware } from '../middleware/authMiddleware';
 import {
   getCurrentWeeklyStats,
   getLeaderboard,
@@ -8,6 +9,8 @@ import {
 } from '../controllers/weeklyTrackingController';
 
 const weeklyStatsRoute = new Hono();
+
+weeklyStatsRoute.use('*', authMiddleware);
 
 weeklyStatsRoute.get('/current', getCurrentWeeklyStats);
 

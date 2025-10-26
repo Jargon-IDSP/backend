@@ -17,7 +17,7 @@ import {
 import { getUserLanguageFromContext } from './helperFunctions/languageHelper';
 
 export async function startAttempt(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   
   if (!userId) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -40,11 +40,16 @@ export async function startAttempt(c: Context) {
 
 export async function getQuiz(c: Context) {
   const customQuizId = c.req.param('customQuizId');
+  const userId = c.get('user')?.id;
+  
+  if (!userId) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
   
   const userLanguage = await getUserLanguageFromContext(c);
   
   try {
-    const quiz = await getQuizWithLanguage(customQuizId, userLanguage);
+    const quiz = await getQuizWithLanguage(customQuizId, userLanguage, userId);
     
     if (!quiz) {
       return c.json({ error: 'Quiz not found' }, 404);
@@ -59,9 +64,14 @@ export async function getQuiz(c: Context) {
 
 export async function translateQuiz(c: Context) {
   const customQuizId = c.req.param('customQuizId');
+  const userId = c.get('user')?.id;
+  
+  if (!userId) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
   
   try {
-    const quiz = await getQuizAllLanguages(customQuizId);
+    const quiz = await getQuizAllLanguages(customQuizId, userId);
     
     if (!quiz) {
       return c.json({ error: 'Quiz not found' }, 404);
@@ -112,7 +122,7 @@ export async function translateQuestion(c: Context) {
 
 
 export async function submitAnswer(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   const attemptId = c.req.param('attemptId');
   
   if (!userId) {
@@ -135,7 +145,7 @@ export async function submitAnswer(c: Context) {
 }
 
 export async function getCurrentAttempt(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   const customQuizId = c.req.param('customQuizId');
   
   if (!userId) {
@@ -152,7 +162,7 @@ export async function getCurrentAttempt(c: Context) {
 }
 
 export async function getStats(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   
   if (!userId) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -180,7 +190,7 @@ export async function getAllAttempts(c: Context) {
 }
 
 export async function getInProgressAttempts(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   
   if (!userId) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -196,7 +206,7 @@ export async function getInProgressAttempts(c: Context) {
 }
 
 export async function retryAttempt(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   const customQuizId = c.req.param('customQuizId');
   
   if (!userId) {
@@ -213,7 +223,7 @@ export async function retryAttempt(c: Context) {
 }
 
 export async function getAttemptHistory(c: Context) {
-  const userId = c.get('userId');
+  const userId = c.get('user')?.id;
   const customQuizId = c.req.param('customQuizId');
   
   if (!userId) {

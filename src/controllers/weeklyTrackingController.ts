@@ -249,15 +249,22 @@ import type { Context } from 'hono';
 
 export async function getCurrentWeeklyStats(c: Context) {
   try {
-    const userId = c.get('userId');
+    const userId = c.get('user')?.id;
     
     if (!userId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
+    // Mark today as active when user checks their stats
+    await markDayActive(userId);
+
     const stats = await getCurrentWeekStats(userId);
     const rank = await getUserWeeklyRank(userId);
     const activeDays = stats.daysActive ? stats.daysActive.split(',').filter((d: string) => d) : [];
+
+    console.log('Weekly stats for user:', userId);
+    console.log('Days active string:', stats.daysActive);
+    console.log('Days active array:', activeDays);
 
     return c.json({
       success: true,

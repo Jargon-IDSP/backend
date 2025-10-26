@@ -6,9 +6,8 @@ import {
   buildWhereClause,
   calculateAvailableTerms,
   enrichFlashcard,
-  combineFlashcardsForPractice,
-  enrichCustomFlashcard,
-} from "./helperFunctions/flashcardHelper";
+  combineFlashcardsForPractice} from "./helperFunctions/flashcardHelper";
+  import { enrichCustomFlashcard } from "./helperFunctions/customFlashcardHelper";
 import {
   generateCacheKey,
   withCache,

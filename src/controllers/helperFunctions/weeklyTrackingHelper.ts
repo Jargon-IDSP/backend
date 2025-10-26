@@ -15,7 +15,7 @@ export function getCurrentWeekStart(): Date {
 
 export function getDayAbbreviation(date: Date = new Date()): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  return days[date.getUTCDay()];
+  return days[date.getUTCDay()] || 'Sun';
 }
 
 export async function getCurrentWeekStats(userId: string): Promise<UserWeeklyStats> {
@@ -41,7 +41,7 @@ export async function getCurrentWeekStats(userId: string): Promise<UserWeeklySta
     });
   }
 
-  return stats;
+  return stats as UserWeeklyStats;
 }
 
 export async function addWeeklyScore(userId: string, points: number): Promise<UserWeeklyStats> {
@@ -220,7 +220,9 @@ export async function getWeeklyStatistics() {
   
   stats.forEach(s => {
     const count = s.daysActive ? s.daysActive.split(',').filter(d => d).length : 0;
-    daysActiveDistribution[count]++;
+    if (daysActiveDistribution[count] !== undefined) {
+      daysActiveDistribution[count]++;
+    }
   });
 
   return {

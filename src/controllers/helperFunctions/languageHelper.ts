@@ -1,14 +1,7 @@
 import type { Langs } from "../../interfaces/customFlashcard";
 import { prisma } from "../../lib/prisma";
 
-// ============================================
-// USER LANGUAGE UTILITIES
-// ============================================
 
-/**
- * Get user's preferred language from database
- * Falls back to English if user not found or language not set
- */
 export async function getUserLanguage(userId: string): Promise<Langs> {
   try {
     const user = await prisma.user.findUnique({
@@ -23,19 +16,12 @@ export async function getUserLanguage(userId: string): Promise<Langs> {
   }
 }
 
-/**
- * Get user language from Hono context
- * Checks user object first, then falls back to database
- * Use this in controllers: const lang = await getUserLanguageFromContext(c);
- */
 export async function getUserLanguageFromContext(c: any): Promise<Langs> {
-  // Try to get from user object first (if auth middleware sets it)
   const user = c.get('user');
   if (user?.language) {
     return normalizeLanguage(user.language);
   }
   
-  // Fall back to fetching from database
   const userId = c.get('userId');
   if (userId) {
     return await getUserLanguage(userId);
@@ -43,10 +29,6 @@ export async function getUserLanguageFromContext(c: any): Promise<Langs> {
   
   return "english";
 }
-
-// ============================================
-// LANGUAGE VALIDATION
-// ============================================
 
 export function normalizeLanguage(language: string): Langs {
   const normalized = language.toLowerCase();
@@ -59,9 +41,6 @@ export function normalizeLanguage(language: string): Langs {
   return "english"; 
 }
 
-// ============================================
-// LANGUAGE FIELD UTILITIES
-// ============================================
 
 export function getLanguageFields(language: Langs) {
   const capitalizedLang = language.charAt(0).toUpperCase() + language.slice(1);
@@ -74,9 +53,6 @@ export function getLanguageFields(language: Langs) {
   };
 }
 
-// ============================================
-// FLASHCARD TRANSFORMATION
-// ============================================
 
 export function transformFlashcard(flashcard: any, userLanguage: Langs = "english") {
   const englishFields = getLanguageFields("english");
@@ -131,10 +107,6 @@ export function transformFlashcardAllLanguages(flashcard: any) {
   };
 }
 
-// ============================================
-// QUESTION TRANSFORMATION
-// ============================================
-
 export function transformQuestion(question: any, userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
   
@@ -176,9 +148,6 @@ export function transformQuestionAllLanguages(question: any) {
   };
 }
 
-// ============================================
-// PRISMA SELECT OBJECTS
-// ============================================
 
 export function getFlashcardSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
@@ -198,6 +167,22 @@ export function getFlashcardSelect(userLanguage: Langs = "english") {
   };
 }
 
+export function getCustomFlashcardSelect(userLanguage: Langs = "english") {
+  const userFields = getLanguageFields(userLanguage);
+  
+  return {
+    id: true,
+    termEnglish: true,
+    [userFields.term]: true,
+    definitionEnglish: true,
+    [userFields.definition]: true,
+    documentId: true,
+    userId: true,
+    createdAt: true,
+    updatedAt: true,
+  };
+}
+
 export function getQuestionSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
   
@@ -208,6 +193,18 @@ export function getQuestionSelect(userLanguage: Langs = "english") {
     [userFields.prompt]: true,
     difficulty: true,
     points: true,
+    tags: true,
+  };
+}
+
+export function getCustomQuestionSelect(userLanguage: Langs = "english") {
+  const userFields = getLanguageFields(userLanguage);
+  
+  return {
+    id: true,
+    correctTermId: true,
+    promptEnglish: true,
+    [userFields.prompt]: true,
     pointsWorth: true,
     customQuizId: true,
   };

@@ -1,13 +1,6 @@
 import { prisma } from "../lib/prisma";
 import type { QuizCategory } from "../interfaces/customFlashcard";
 
-// ============================================
-// CUSTOM FLASHCARD QUERIES (with new indexes)
-// ============================================
-
-/**
- * Get custom flashcards sorted by quiz and language
- */
 export async function getFlashcardsByQuiz(
   quizId: string,
   language: 'english' | 'french' | 'chinese' | 'spanish' | 'tagalog' | 'punjabi' | 'korean' = 'english'
@@ -17,10 +10,10 @@ export async function getFlashcardsByQuiz(
     include: {
       correctAnswer: true,
     },
-    orderBy: { createdAt: 'asc' }, // Uses customQuizId + createdAt index
+    orderBy: { createdAt: 'asc' }, 
   });
 
-  // Return with selected language
+
   return questions.map(q => ({
     id: q.id,
     prompt: q[`prompt${language.charAt(0).toUpperCase() + language.slice(1)}` as keyof typeof q],
@@ -29,9 +22,7 @@ export async function getFlashcardsByQuiz(
   }));
 }
 
-/**
- * Get user's custom flashcards sorted by date
- */
+
 export async function getUserCustomFlashcards(
   userId: string,
   limit: number = 50,
@@ -39,7 +30,7 @@ export async function getUserCustomFlashcards(
 ) {
   return await prisma.customFlashcard.findMany({
     where: { userId },
-    orderBy: { createdAt: 'desc' }, // Uses userId + createdAt index
+    orderBy: { createdAt: 'desc' }, 
     take: limit,
     skip: offset,
     include: {
@@ -50,19 +41,15 @@ export async function getUserCustomFlashcards(
   });
 }
 
-/**
- * Get custom flashcards by document, sorted by creation
- */
+
 export async function getDocumentFlashcards(documentId: string) {
   return await prisma.customFlashcard.findMany({
     where: { documentId },
-    orderBy: { createdAt: 'asc' }, // Uses documentId + createdAt index
+    orderBy: { createdAt: 'asc' }, 
   });
 }
 
-/**
- * Get quizzes by category
- */
+
 export async function getQuizzesByCategory(
   userId: string,
   category: QuizCategory
@@ -70,7 +57,7 @@ export async function getQuizzesByCategory(
   return await prisma.customQuiz.findMany({
     where: {
       userId,
-      category, // Uses category index
+      category,
     },
     orderBy: { createdAt: 'desc' },
     include: {
@@ -84,9 +71,7 @@ export async function getQuizzesByCategory(
   });
 }
 
-/**
- * Get all categories for a user with counts
- */
+
 export async function getUserQuizCategories(userId: string) {
   const quizzes = await prisma.customQuiz.groupBy({
     by: ['category'],
@@ -103,13 +88,7 @@ export async function getUserQuizCategories(userId: string) {
   }));
 }
 
-// ============================================
-// PRE-BUILT FLASHCARD QUERIES (with new indexes)
-// ============================================
 
-/**
- * Get flashcards by level and industry (optimized with composite index)
- */
 export async function getFlashcardsByLevelAndIndustry(
   levelId: number,
   industryId?: number,
@@ -120,14 +99,12 @@ export async function getFlashcardsByLevelAndIndustry(
       levelId,
       ...(industryId ? { industryId } : {}),
     },
-    // Uses levelId + industryId composite index
     include: {
       level: true,
       industry: true,
     },
   });
 
-  // Return with selected language
   return flashcards.map(f => ({
     id: f.id,
     term: f[`term${language.charAt(0).toUpperCase() + language.slice(1)}` as keyof typeof f],
@@ -137,21 +114,18 @@ export async function getFlashcardsByLevelAndIndustry(
   }));
 }
 
-/**
- * Get questions by level (optimized)
- */
+
 export async function getQuestionsByLevel(levelId: number) {
-  // First get quizzes for this level
-  const quizzes = await prisma.quiz.findMany({
+  const flashcardsAtLevel = await prisma.flashcard.findMany({
     where: { levelId },
     select: { id: true },
   });
 
-  const quizIds = quizzes.map(q => q.id);
+  const flashcardIds = flashcardsAtLevel.map(f => f.id);
 
   return await prisma.question.findMany({
     where: {
-      quizId: { in: quizIds },
+      correctTermId: { in: flashcardIds },
     },
     include: {
       correctAnswer: {
@@ -164,15 +138,13 @@ export async function getQuestionsByLevel(levelId: number) {
   });
 }
 
-/**
- * Get questions by difficulty (uses difficulty index)
- */
+
 export async function getQuestionsByDifficulty(
   difficulty: number,
   limit: number = 20
 ) {
   return await prisma.question.findMany({
-    where: { difficulty }, // Uses difficulty index
+    where: { difficulty }, 
     take: limit,
     include: {
       correctAnswer: true,
@@ -180,9 +152,7 @@ export async function getQuestionsByDifficulty(
   });
 }
 
-/**
- * Get flashcards by industry across all levels
- */
+
 export async function getFlashcardsByIndustry(
   industryId: number,
   sortByLevel: boolean = true
@@ -190,7 +160,7 @@ export async function getFlashcardsByIndustry(
   return await prisma.flashcard.findMany({
     where: { industryId },
     orderBy: sortByLevel 
-      ? { levelId: 'asc' } // Uses industryId + levelId composite index
+      ? { levelId: 'asc' } 
       : { termEnglish: 'asc' },
     include: {
       level: true,
@@ -199,22 +169,14 @@ export async function getFlashcardsByIndustry(
   });
 }
 
-// ============================================
-// DOCUMENT TRANSLATION QUERIES
-// ============================================
 
-/**
- * Get or create document translation
- */
 export async function getDocumentTranslation(documentId: string) {
   return await prisma.documentTranslation.findUnique({
-    where: { documentId }, // Uses documentId index
+    where: { documentId }, 
   });
 }
 
-/**
- * Get document with translation in specific language
- */
+
 export async function getDocumentInLanguage(
   documentId: string,
   language: 'english' | 'french' | 'chinese' | 'spanish' | 'tagalog' | 'punjabi' | 'korean' = 'english'
@@ -236,13 +198,6 @@ export async function getDocumentInLanguage(
   };
 }
 
-// ============================================
-// SEARCH AND FILTER EXAMPLES
-// ============================================
-
-/**
- * Advanced search: Custom flashcards with multiple filters
- */
 export async function searchCustomFlashcards(params: {
   userId: string;
   category?: QuizCategory;
@@ -263,7 +218,6 @@ export async function searchCustomFlashcards(params: {
     offset = 0,
   } = params;
 
-  // Build where clause
   const where: any = { userId };
   
   if (documentId) {
@@ -276,7 +230,6 @@ export async function searchCustomFlashcards(params: {
     };
   }
 
-  // If filtering by category, join through questions
   if (category) {
     where.questions = {
       some: {
@@ -287,14 +240,13 @@ export async function searchCustomFlashcards(params: {
     };
   }
 
-  // Build orderBy
   const orderBy = sortBy === 'date' 
     ? { createdAt: 'desc' as const }
     : { termEnglish: 'asc' as const };
 
   return await prisma.customFlashcard.findMany({
     where,
-    orderBy, // Uses appropriate composite index
+    orderBy,
     take: limit,
     skip: offset,
     include: {
@@ -305,40 +257,24 @@ export async function searchCustomFlashcards(params: {
   });
 }
 
-/**
- * Get user's quiz statistics by category
- */
+
 export async function getUserQuizStats(userId: string) {
-  const stats = await prisma.customQuiz.groupBy({
-    by: ['category', 'completed'],
-    where: { userId },
+  const stats = await prisma.userQuizAttempt.groupBy({
+    by: ['customQuizId'],
+    where: { 
+      userId,
+      customQuizId: { not: null },
+      completed: true,
+    },
     _count: true,
-    _avg: { score: true },
+    _avg: { 
+      pointsEarned: true,
+      percentCorrect: true,
+    },
+    _sum: {
+      pointsEarned: true,
+    },
   });
 
   return stats;
 }
-
-/*
-PERFORMANCE NOTES:
-
-These queries are optimized using the new indexes:
-
-1. Custom Content Sorting:
-   - By quiz: customQuizId + createdAt
-   - By user: userId + createdAt
-   - By document: documentId + createdAt
-   - By category: category index
-
-2. Pre-built Content Sorting:
-   - By level & industry: levelId + industryId composite
-   - By industry & level: industryId + levelId composite
-   - By difficulty: difficulty index
-
-3. The composite indexes (level + industry) allow fast queries when:
-   - Filtering by both: WHERE levelId = ? AND industryId = ?
-   - Filtering by level only: WHERE levelId = ?
-   - Sorting by level within industry: WHERE industryId = ? ORDER BY levelId
-
-4. Document translations use unique constraint on documentId for O(1) lookups
-*/

@@ -39,8 +39,8 @@ model Level {
   id   Int    @id @default(autoincrement())
   name String @unique
   
-  flashcards Flashcard[]
-  quizzes    Quiz[]
+  flashcards   Flashcard[]
+  quizAttempts UserQuizAttempt[]
   
   @@map("levels")
 }
@@ -95,37 +95,13 @@ model Question {
   tags String @db.Text
   
   points Int     @default(5)
-  quizId String?
   
   correctAnswer Flashcard @relation("QuestionCorrectAnswer", fields: [correctTermId], references: [id])
-  quiz          Quiz?     @relation(fields: [quizId], references: [id], onDelete: SetNull)
   
   @@index([correctTermId], map: "questions_correctTermId_fkey")
   @@index([difficulty])
   @@index([points])
-  @@index([quizId])
   @@map("questions")
-}
-
-model Quiz {
-  id String @id @default(cuid())
-  
-  userId String
-  levelId Int
-  
-  completed Boolean @default(false)
-  score     Int     @default(0)
-  
-  createdAt DateTime @default(now())
-  completedAt DateTime?
-  
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  level     Level     @relation(fields: [levelId], references: [id])
-  questions Question[]
-  
-  @@index([userId])
-  @@index([levelId])
-  @@map("quizzes")
 }
 
 
@@ -291,7 +267,8 @@ model UserQuizAttempt {
   id String @id @default(cuid())
   
   userId       String
-  customQuizId String
+  customQuizId String?  
+  levelId      Int?    
   
   questionsAnswered   Int @default(0)  
   questionsCorrect    Int @default(0)  
@@ -307,16 +284,18 @@ model UserQuizAttempt {
   startedAt   DateTime @default(now())
   completedAt DateTime?
   
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customQuiz CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customQuiz CustomQuiz? @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  level      Level?      @relation(fields: [levelId], references: [id], onDelete: SetNull)
   answers    UserQuizAnswer[]
   
-  // REMOVED: @@unique([userId, customQuizId]) to allow multiple attempts
   @@index([userId])
   @@index([customQuizId])
+  @@index([levelId])
   @@index([completed])
   @@index([userId, completed])
   @@index([userId, customQuizId]) 
+  @@index([userId, levelId])
   @@map("user_quiz_attempts")
 }
 
@@ -346,7 +325,7 @@ model UserWeeklyStats {
   id String @id @default(cuid())
   userId String
   
-  weekStartDate DateTime  // Monday at midnight UTC
+  weekStartDate DateTime 
   weeklyScore Int @default(0)
   daysActive String @default("") 
   
@@ -378,7 +357,6 @@ model User {
   documents            Document[]
   customFlashcards     CustomFlashcard[]
   customQuestions      CustomQuestion[]
-  quizzes              Quiz[]
   customQuizzes        CustomQuiz[] 
   quizAttempts         UserQuizAttempt[]
   documentTranslations DocumentTranslation[]

@@ -23,6 +23,7 @@ export const documentRoute = new Hono()
   .get("/:id/download", getDownloadUrl)
   .get("/:id", getDocument)
   .delete("/:id", deleteDocument)
+  
   // Manual triggers (kept for testing, hidden from UI)
   .post("/:id/ocr", triggerOCR)
   .post("/:id/generate-custom", generateCustomForDocument);

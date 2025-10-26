@@ -49,7 +49,8 @@ export interface CustomQuizWithAttempt extends CustomQuizData {
 export interface UserQuizAttempt {
   id: string;
   userId: string;
-  customQuizId: string;
+  customQuizId: string | null;
+  levelId: number | null;
   
   questionsAnswered: number;
   questionsCorrect: number;

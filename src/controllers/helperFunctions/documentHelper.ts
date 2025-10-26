@@ -6,8 +6,8 @@ import { getGoogleAccessToken, getGoogleCloudConfig } from "../../lib/OCRData";
 import crypto from "crypto";
 import type { QuizCategory } from "../../interfaces/customFlashcard";
 import type { DocumentTranslationData } from "../../interfaces/documentInterfaces";
+import { MODEL } from "./aiHelper";
 
-const MODEL = "gemini-flash-latest";
 const AllowedOCRFileTypes = ['application/pdf', 'image/jpeg', 'image/png'];
 
 function extractResponseText(response: any): string {

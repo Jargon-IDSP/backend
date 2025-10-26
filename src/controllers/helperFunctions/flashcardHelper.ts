@@ -1,7 +1,16 @@
 import type { Context } from "hono";
 import { prisma } from "../../lib/prisma";
 import type { Langs } from "../../interfaces/customFlashcard";
+import {
+  normalizeLanguage,
+  getLanguageFieldName,
+  getLanguageValue,
+  getAllLanguageFields,
+  getLanguageSelect,
+  convertToDisplayFormat,
+} from "./translationHelper";
 
+export { normalizeLanguage, getLanguageFieldName, getLanguageValue, getAllLanguageFields };
 
 export const extractQueryParams = (c: Context) => {
   return {
@@ -11,6 +20,7 @@ export const extractQueryParams = (c: Context) => {
   };
 };
 
+
 export const extractRouteParams = (c: Context) => {
   return {
     levelId: c.req.param("levelId"),
@@ -19,6 +29,7 @@ export const extractRouteParams = (c: Context) => {
     userId: c.req.param("userId"),
   };
 };
+
 
 export const buildWhereClause = (filters: {
   levelId?: string | number | null;
@@ -48,231 +59,46 @@ export const buildWhereClause = (filters: {
   return whereClause;
 };
 
-export function normalizeLanguage(language: string): Langs {
-  const normalized = language.toLowerCase();
-  const validLanguages: Langs[] = ["english", "french", "chinese", "spanish", "tagalog", "punjabi", "korean"];
-  
-  if (validLanguages.includes(normalized as Langs)) {
-    return normalized as Langs;
-  }
-  
-  return "english";
-}
-
-export function getLanguageFieldName(fieldPrefix: string, language: Langs): string {
-  if (language === "english") {
-    return `${fieldPrefix}English`;
-  }
-  const capitalizedLang = language.charAt(0).toUpperCase() + language.slice(1);
-  return `${fieldPrefix}${capitalizedLang}`;
-}
-
-export const getLanguageValue = (
-  data: any,
-  fieldPrefix: string,
-  language: string
-): string | undefined => {
-  const lang = normalizeLanguage(language);
-  const fieldName = getLanguageFieldName(fieldPrefix, lang);
-  return data[fieldName];
-};
-
 
 export function getFlashcardSelect(userLanguage: Langs = "english") {
-  const select: any = {
+  return getLanguageSelect(userLanguage, {
     id: true,
-    termEnglish: true,
-    definitionEnglish: true,
     industryId: true,
     levelId: true,
-  };
-
-  if (userLanguage !== "english") {
-    const termField = getLanguageFieldName("term", userLanguage);
-    const defField = getLanguageFieldName("definition", userLanguage);
-    select[termField] = true;
-    select[defField] = true;
-  }
-
-  return select;
+  });
 }
 
 
-export function getCustomFlashcardSelect(userLanguage: Langs = "english") {
-  const select: any = {
-    id: true,
-    termEnglish: true,
-    definitionEnglish: true,
-    documentId: true,
-    userId: true,
-    createdAt: true,
-    updatedAt: true,
-  };
-
-  if (userLanguage !== "english") {
-    const termField = getLanguageFieldName("term", userLanguage);
-    const defField = getLanguageFieldName("definition", userLanguage);
-    select[termField] = true;
-    select[defField] = true;
-  }
-
-  return select;
-}
-
-export function getAllLanguageFields() {
-  return {
-    termEnglish: true,
-    termFrench: true,
-    termChinese: true,
-    termSpanish: true,
-    termTagalog: true,
-    termPunjabi: true,
-    termKorean: true,
-    definitionEnglish: true,
-    definitionFrench: true,
-    definitionChinese: true,
-    definitionSpanish: true,
-    definitionTagalog: true,
-    definitionPunjabi: true,
-    definitionKorean: true,
-  };
-}
-
-export const convertToDisplayFormat = (dbFlashcard: any, language?: string) => {
-  const lang = normalizeLanguage(language || "english");
-  
-  const result: any = {
-    id: dbFlashcard.id,
-    term: {
-      english: dbFlashcard.termEnglish || "",
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish || "",
-    },
-    industry_id: dbFlashcard.industryId,
-    level_id: dbFlashcard.levelId,
-  };
-
-  if (lang !== "english") {
-    const termField = getLanguageFieldName("term", lang);
-    const defField = getLanguageFieldName("definition", lang);
-    
-    if (dbFlashcard[termField]) {
-      result.term[lang] = dbFlashcard[termField];
+export const convertFlashcardToDisplayFormat = (dbFlashcard: any, language?: string) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { language },
+    {
+      industry_id: dbFlashcard.industryId,
+      level_id: dbFlashcard.levelId,
     }
-    if (dbFlashcard[defField]) {
-      result.definition[lang] = dbFlashcard[defField];
-    }
-  }
-
-  return result;
+  );
 };
 
-export const convertToDisplayFormatAllLanguages = (dbFlashcard: any) => {
-  return {
-    id: dbFlashcard.id,
-    term: {
-      english: dbFlashcard.termEnglish || "",
-      french: dbFlashcard.termFrench || "",
-      chinese: dbFlashcard.termChinese || "",
-      spanish: dbFlashcard.termSpanish || "",
-      tagalog: dbFlashcard.termTagalog || "",
-      punjabi: dbFlashcard.termPunjabi || "",
-      korean: dbFlashcard.termKorean || "",
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish || "",
-      french: dbFlashcard.definitionFrench || "",
-      chinese: dbFlashcard.definitionChinese || "",
-      spanish: dbFlashcard.definitionSpanish || "",
-      tagalog: dbFlashcard.definitionTagalog || "",
-      punjabi: dbFlashcard.definitionPunjabi || "",
-      korean: dbFlashcard.definitionKorean || "",
-    },
-    industry_id: dbFlashcard.industryId,
-    level_id: dbFlashcard.levelId,
-  };
-};
 
+export const convertFlashcardToDisplayFormatAllLanguages = (dbFlashcard: any) => {
+  return convertToDisplayFormat(
+    dbFlashcard,
+    { includeAllLanguages: true },
+    {
+      industry_id: dbFlashcard.industryId,
+      level_id: dbFlashcard.levelId,
+    }
+  );
+};
 
 export const enrichFlashcard = (flashcard: any, language?: string) => {
   const lang = language?.toLowerCase() || 'english';
   
   return {
-    ...convertToDisplayFormat(flashcard, lang),
+    ...convertFlashcardToDisplayFormat(flashcard, lang),
     industry: flashcard.industry?.name || "General",
     level: flashcard.level?.name || null,
-  };
-};
-
-export const convertCustomToDisplayFormat = (dbFlashcard: any, language?: string) => {
-  const lang = normalizeLanguage(language || "english");
-  
-  const result: any = {
-    id: dbFlashcard.id,
-    documentId: dbFlashcard.documentId,
-    userId: dbFlashcard.userId,
-    term: {
-      english: dbFlashcard.termEnglish || "",
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish || "",
-    },
-  };
-
-  if (lang !== "english") {
-    const termField = getLanguageFieldName("term", lang);
-    const defField = getLanguageFieldName("definition", lang);
-    
-    if (dbFlashcard[termField]) {
-      result.term[lang] = dbFlashcard[termField];
-    }
-    if (dbFlashcard[defField]) {
-      result.definition[lang] = dbFlashcard[defField];
-    }
-  }
-
-  return result;
-};
-
-export const convertCustomToDisplayFormatAllLanguages = (dbFlashcard: any) => {
-  return {
-    id: dbFlashcard.id,
-    documentId: dbFlashcard.documentId,
-    userId: dbFlashcard.userId,
-    term: {
-      english: dbFlashcard.termEnglish || "",
-      french: dbFlashcard.termFrench || "",
-      chinese: dbFlashcard.termChinese || "",
-      spanish: dbFlashcard.termSpanish || "",
-      tagalog: dbFlashcard.termTagalog || "",
-      punjabi: dbFlashcard.termPunjabi || "",
-      korean: dbFlashcard.termKorean || "",
-    },
-    definition: {
-      english: dbFlashcard.definitionEnglish || "",
-      french: dbFlashcard.definitionFrench || "",
-      chinese: dbFlashcard.definitionChinese || "",
-      spanish: dbFlashcard.definitionSpanish || "",
-      tagalog: dbFlashcard.definitionTagalog || "",
-      punjabi: dbFlashcard.definitionPunjabi || "",
-      korean: dbFlashcard.definitionKorean || "",
-    },
-  };
-};
-
-export const enrichCustomFlashcard = (flashcard: any, language?: string) => {
-  const lang = language?.toLowerCase() || 'english';
-  
-  return {
-    ...convertCustomToDisplayFormat(flashcard, lang),
-    document: flashcard.document
-      ? {
-          id: flashcard.document.id,
-          filename: flashcard.document.filename,
-          fileUrl: flashcard.document.fileUrl,
-        }
-      : null,
   };
 };
 
@@ -318,6 +144,7 @@ export const calculateAvailableTerms = async (
   };
 };
 
+
 export async function getFlashcardsByLevel(levelId: number, userLanguage: string = "english") {
   const lang = normalizeLanguage(userLanguage);
   
@@ -337,6 +164,7 @@ export async function getFlashcardsByLevel(levelId: number, userLanguage: string
   return flashcards.map(fc => enrichFlashcard(fc, lang));
 }
 
+
 export async function getFlashcardsByIndustry(industryId: number, userLanguage: string = "english") {
   const lang = normalizeLanguage(userLanguage);
   
@@ -355,6 +183,7 @@ export async function getFlashcardsByIndustry(industryId: number, userLanguage: 
 
   return flashcards.map(fc => enrichFlashcard(fc, lang));
 }
+
 
 export async function getFlashcardsForPractice(
   levelId: number,
@@ -409,35 +238,8 @@ export async function getFlashcardAllLanguages(id: string) {
   if (!flashcard) return null;
   
   return {
-    ...convertToDisplayFormatAllLanguages(flashcard),
+    ...convertFlashcardToDisplayFormatAllLanguages(flashcard),
     industry: flashcard.industry?.name || "General",
     level: flashcard.level?.name || null,
-  };
-}
-
-
-export async function getCustomFlashcardAllLanguages(id: string) {
-  const flashcard = await prisma.customFlashcard.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      ...getAllLanguageFields(),
-      documentId: true,
-      userId: true,
-      document: {
-        select: {
-          id: true,
-          filename: true,
-          fileUrl: true,
-        }
-      }
-    },
-  });
-
-  if (!flashcard) return null;
-  
-  return {
-    ...convertCustomToDisplayFormatAllLanguages(flashcard),
-    document: flashcard.document,
   };
 }

@@ -1,16 +1,18 @@
 import { prisma } from "../../lib/prisma";
 import type { UserQuizAttempt, UserQuizAnswer } from "../../interfaces/quizData";
-import type { Langs } from "../../interfaces/customFlashcard";
 import { addWeeklyScore } from "./weeklyTrackingHelper";
+import { enrichQuestionWithChoices } from "./questionHelper";
 import {
   normalizeLanguage,
   transformQuestion,
   transformQuestions,
   getQuestionSelect,
+  getCustomQuestionSelect,
   getAllQuestionLanguageFields,
   transformQuestionAllLanguages,
   transformFlashcard,
   getFlashcardSelect,
+  getCustomFlashcardSelect,
 } from "./languageHelper";
 
 
@@ -27,6 +29,23 @@ export async function startQuizAttempt(
   });
 
   if (!quiz) throw new Error("Quiz not found");
+
+  const isOwner = quiz.userId === userId;
+  
+  if (!isOwner) {
+    const isShared = await prisma.customQuizShare.findUnique({
+      where: {
+        customQuizId_sharedWithUserId: {
+          customQuizId,
+          sharedWithUserId: userId,
+        },
+      },
+    });
+    
+    if (!isShared) {
+      throw new Error("Unauthorized: You don't have access to this quiz");
+    }
+  }
 
   const totalQuestions = quiz._count.questions;
   const maxPossiblePoints = quiz.questions.reduce((sum, q) => sum + q.pointsWorth, 0);
@@ -184,7 +203,7 @@ export async function getUserQuizStats(userId: string) {
 
   const byCategory: Record<string, any> = {};
   attempts.forEach((attempt) => {
-    const cat = attempt.customQuiz.category || "UNCATEGORIZED";
+    const cat = attempt.customQuiz?.category || "UNCATEGORIZED";
     if (!byCategory[cat]) {
       byCategory[cat] = {
         attempts: 0,
@@ -337,7 +356,7 @@ export async function getQuizWithInfo(quizId: string) {
 }
 
 
-export async function getQuizWithLanguage(quizId: string, userLanguage: string = "english") {
+export async function getQuizWithLanguage(quizId: string, userLanguage: string = "english", userId?: string) {
   const lang = normalizeLanguage(userLanguage);
   
   const quiz = await prisma.customQuiz.findUnique({
@@ -353,12 +372,40 @@ export async function getQuizWithLanguage(quizId: string, userLanguage: string =
         select: { questions: true },
       },
       questions: {
-        select: getQuestionSelect(lang),
+        select: {
+          ...getCustomQuestionSelect(lang),
+          correctAnswer: {
+            select: getCustomFlashcardSelect(lang),
+          },
+        },
       },
     },
   });
 
   if (!quiz) return null;
+
+  if (userId) {
+    const isOwner = quiz.userId === userId;
+    
+    if (!isOwner) {
+      const isShared = await prisma.customQuizShare.findUnique({
+        where: {
+          customQuizId_sharedWithUserId: {
+            customQuizId: quizId,
+            sharedWithUserId: userId,
+          },
+        },
+      });
+      
+      if (!isShared) {
+        return null; 
+      }
+    }
+  }
+
+  const enrichedQuestions = await Promise.all(
+    quiz.questions.map(q => enrichQuestionWithChoices(prisma, q, lang, true))
+  );
 
   return {
     id: quiz.id,
@@ -367,7 +414,7 @@ export async function getQuizWithLanguage(quizId: string, userLanguage: string =
     pointsPerQuestion: quiz.pointsPerQuestion,
     document: quiz.document,
     totalQuestions: quiz._count.questions,
-    questions: transformQuestions(quiz.questions, lang),
+    questions: enrichedQuestions,
   };
 }
 
@@ -380,9 +427,9 @@ export async function getQuizWithAnswers(quizId: string, userLanguage: string = 
     include: {
       questions: {
         select: {
-          ...getQuestionSelect(lang),
+          ...getCustomQuestionSelect(lang),
           correctAnswer: {
-            select: getFlashcardSelect(lang),
+            select: getCustomFlashcardSelect(lang),
           },
         },
       },
@@ -409,7 +456,7 @@ export async function getQuestionById(questionId: string, userLanguage: string =
   
   const question = await prisma.customQuestion.findUnique({
     where: { id: questionId },
-    select: getQuestionSelect(lang),
+    select: getCustomQuestionSelect(lang),
   });
 
   if (!question) return null;
@@ -434,7 +481,7 @@ export async function getQuestionAllLanguages(questionId: string) {
   return transformQuestionAllLanguages(question);
 }
 
-export async function getQuizAllLanguages(quizId: string) {
+export async function getQuizAllLanguages(quizId: string, userId?: string) {
   const quiz = await prisma.customQuiz.findUnique({
     where: { id: quizId },
     include: {
@@ -450,6 +497,25 @@ export async function getQuizAllLanguages(quizId: string) {
   });
 
   if (!quiz) return null;
+
+  if (userId) {
+    const isOwner = quiz.userId === userId;
+    
+    if (!isOwner) {
+      const isShared = await prisma.customQuizShare.findUnique({
+        where: {
+          customQuizId_sharedWithUserId: {
+            customQuizId: quizId,
+            sharedWithUserId: userId,
+          },
+        },
+      });
+      
+      if (!isShared) {
+        return null; 
+      }
+    }
+  }
 
   return {
     id: quiz.id,

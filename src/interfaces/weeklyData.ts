@@ -3,7 +3,7 @@ export interface UserWeeklyStats {
   userId: string;
   weekStartDate: Date;
   weeklyScore: number;
-  daysActive: string; 
+  daysActive: string;
   createdAt: Date;
   updatedAt: Date;
 }
