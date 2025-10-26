@@ -23,7 +23,7 @@ export interface GenerateCustomFromOCROptions {
 }
 
 export interface ExtractionResponse {
-  terms: { english: string; definitionEnglish: string }[];
+  terms: { english: string; definitionEnglish: string; category: QuizCategory }[];
   questions: { promptEnglish: string; correctEnglish: string }[];
 }
 
@@ -43,6 +43,7 @@ export interface TermOut {
     definition: Record<Langs, string>;
     documentId: string;
     userId: string;
+    category: QuizCategory;
   };
 }
 
@@ -52,6 +53,7 @@ export interface QuestionOut {
   prompt: Record<Langs, string>;
   documentId: string;
   userId: string;
+  category: QuizCategory;
 }
 
 export interface GenerateResult {
@@ -79,6 +81,8 @@ export interface CustomFlashcardData {
   definitionTagalog: string;
   definitionPunjabi: string;
   definitionKorean: string;
+
+  category: QuizCategory;
 }
 
 export interface CustomQuestionData {
@@ -96,6 +100,7 @@ export interface CustomQuestionData {
   promptKorean: string;
   
   pointsWorth: number; // ADDED: from new schema
+  category: QuizCategory;
 }
 
 export interface CustomFlashcardFilters {

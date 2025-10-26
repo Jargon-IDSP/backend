@@ -159,6 +159,7 @@ model CustomFlashcard {
   
   documentId String?
   userId     String
+  category   QuizCategory @default(General)
   
   termEnglish  String @db.Text
   termFrench   String @db.Text
@@ -186,6 +187,7 @@ model CustomFlashcard {
 
   @@index([userId, createdAt])
   @@index([documentId, createdAt])
+  @@index([category])
   @@index([termEnglish(length: 255)])
   @@map("custom_flashcards")
 }
@@ -196,6 +198,7 @@ model CustomQuestion {
   userId String
   customQuizId String?  
   correctTermId String
+  category QuizCategory @default(General)
   
   promptEnglish  String @db.Text
   promptFrench   String @db.Text
@@ -216,6 +219,7 @@ model CustomQuestion {
   
   @@index([userId, createdAt])
   @@index([customQuizId, createdAt])
+  @@index([category])
   @@index([correctTermId])
   @@map("custom_questions")
 }

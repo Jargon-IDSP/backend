@@ -239,7 +239,8 @@ export const saveDocument = async (c: Context) => {
 
     return c.json({ 
       document,
-      redirectUrl: `/documents/${document.id}/translation`  
+      redirectUrl: `/documents/user`,
+      documentId: document.id
     });
   } catch (error) {
     console.error("Save document error:", error);

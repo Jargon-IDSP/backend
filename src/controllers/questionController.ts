@@ -465,7 +465,10 @@ export const getCustomQuestionsByCategory = async (c: Context) => {
       },
     });
 
-    const displayQuestions = questions.map(q => enrichCustomQuestion(q, lang));
+    // Enrich questions with choices for quiz format
+    const displayQuestions = await Promise.all(
+      questions.map(q => enrichQuestionWithChoices(prisma, q, lang, true))
+    );
 
     const response = successResponse(displayQuestions, {
       count: questions.length,

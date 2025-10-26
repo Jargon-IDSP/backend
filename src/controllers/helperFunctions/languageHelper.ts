@@ -189,8 +189,14 @@ export function getQuestionSelect(userLanguage: Langs = "english") {
   return {
     id: true,
     correctTermId: true,
+    // Include ALL language prompt fields for translation
     promptEnglish: true,
-    [userFields.prompt]: true,
+    promptFrench: true,
+    promptChinese: true,
+    promptSpanish: true,
+    promptTagalog: true,
+    promptPunjabi: true,
+    promptKorean: true,
     difficulty: true,
     points: true,
     tags: true,
@@ -203,8 +209,14 @@ export function getCustomQuestionSelect(userLanguage: Langs = "english") {
   return {
     id: true,
     correctTermId: true,
+    // Include ALL language prompt fields for translation
     promptEnglish: true,
-    [userFields.prompt]: true,
+    promptFrench: true,
+    promptChinese: true,
+    promptSpanish: true,
+    promptTagalog: true,
+    promptPunjabi: true,
+    promptKorean: true,
     pointsWorth: true,
     customQuizId: true,
   };

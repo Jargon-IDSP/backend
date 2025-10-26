@@ -129,13 +129,22 @@ IMPORTANT: You must return exactly 10 terms and 10 questions.
 - If fewer than 10 terms are found, generate additional relevant terms related to the document's topic to reach exactly 10 terms
 - For example, if a document mentions "PPE" and "hard hat", you could add related terms like "safety goggles", "steel-toed boots", "high-visibility vest", etc.
 
-For each term provide a concise English definition (10–25 words).
+For each term provide:
+1. A concise English definition (10–25 words)
+2. A category classification from: Safety, Technical, Training, Workplace, Professional, or General
+   - Safety: Personal protective equipment, safety procedures, hazards, emergency protocols
+   - Technical: Tools, equipment, machinery, technical processes, specifications
+   - Training: Learning methods, skill development, certifications, apprenticeship
+   - Workplace: Work environment, team collaboration, workplace policies, communication
+   - Professional: Career development, industry standards, professional conduct, ethics
+   - General: Basic concepts that don't fit other categories
+
 Also produce EXACTLY 10 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
 
 Return STRICT JSON ONLY:
 {
   "terms": [
-    { "english": "Term1", "definitionEnglish": "..." },
+    { "english": "Term1", "definitionEnglish": "...", "category": "Safety" },
     ...
   ],
   "questions": [
@@ -193,14 +202,15 @@ SOURCE:
 }
 
 export function cleanAndDeduplicateTerms(
-  extractedTerms: { english: string; definitionEnglish: string }[],
+  extractedTerms: { english: string; definitionEnglish: string; category: QuizCategory }[],
   dedupSet: Set<string>,
   limit: number = 10
-): { english: string; definitionEnglish: string }[] {
+): { english: string; definitionEnglish: string; category: QuizCategory }[] {
   const cleanTerms = (extractedTerms || [])
     .map((t) => ({
       english: (t.english || "").trim(),
       definitionEnglish: (t.definitionEnglish || "").trim(),
+      category: t.category || "General" as QuizCategory,
     }))
     .filter((t) => t.english && !dedupSet.has(t.english.toLowerCase()));
 
@@ -209,11 +219,19 @@ export function cleanAndDeduplicateTerms(
 
 export function filterAndFillQuestions(
   questions: { promptEnglish: string; correctEnglish: string }[],
-  terms: { english: string; definitionEnglish: string }[]
-): { promptEnglish: string; correctEnglish: string }[] {
+  terms: { english: string; definitionEnglish: string; category: QuizCategory }[]
+): { promptEnglish: string; correctEnglish: string; category: QuizCategory }[] {
   const kept = new Set(terms.map((t) => t.english.toLowerCase()));
   let qEnglish = (questions || [])
     .filter((q) => kept.has((q.correctEnglish || "").trim().toLowerCase()))
+    .map((q) => {
+      // Find the corresponding term to get its category
+      const term = terms.find(t => t.english.toLowerCase() === q.correctEnglish.trim().toLowerCase());
+      return {
+        ...q,
+        category: term?.category || "General" as QuizCategory
+      };
+    })
     .slice(0, 10);
 
   if (qEnglish.length < terms.length) {
@@ -221,6 +239,7 @@ export function filterAndFillQuestions(
     const fillers = terms.slice(-need).map((t) => ({
       promptEnglish: `Which term matches this definition: ${t.definitionEnglish}?`,
       correctEnglish: t.english,
+      category: t.category,
     }));
     qEnglish = qEnglish.concat(fillers).slice(0, 10);
   }
@@ -229,7 +248,7 @@ export function filterAndFillQuestions(
 }
 
 export function buildTermsOutput(
-  terms: { english: string; definitionEnglish: string }[],
+  terms: { english: string; definitionEnglish: string; category: QuizCategory }[],
   translated: TranslationResponse,
   documentId: string,
   userId: string
@@ -268,13 +287,14 @@ export function buildTermsOutput(
         definition: defMap,
         documentId,
         userId,
+        category: t.category,
       },
     };
   });
 }
 
 export function buildQuestionsOutput(
-  questions: { promptEnglish: string; correctEnglish: string }[],
+  questions: { promptEnglish: string; correctEnglish: string; category: QuizCategory }[],
   translated: TranslationResponse,
   documentId: string,
   userId: string
@@ -293,7 +313,7 @@ export function buildQuestionsOutput(
       korean: trQ?.prompt?.korean ?? q.promptEnglish,
     };
 
-    return { id, correctTermId: String(i + 1), prompt, documentId, userId };
+    return { id, correctTermId: String(i + 1), prompt, documentId, userId, category: q.category };
   });
 }
 
@@ -342,6 +362,8 @@ export function transformToCustomFlashcardData(
       definitionTagalog: t.term.definition.tagalog,
       definitionPunjabi: t.term.definition.punjabi,
       definitionKorean: t.term.definition.korean,
+
+      category: t.term.category,
     };
   });
 }
@@ -372,6 +394,7 @@ export function transformToCustomQuestionData(
       promptKorean: q.prompt.korean,
       
       pointsWorth,
+      category: q.category,
     };
   });
 }
