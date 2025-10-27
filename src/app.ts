@@ -43,6 +43,12 @@ connectRedis()
 
 // Health check endpoint (useful for monitoring)
 app.get("/health", (c) => c.json({ status: "ok" }));
+app.get("/", (c) =>
+  c.json({
+    message: "It's working!",
+    status: "ok",
+  })
+);
 
 // Routes
 app.route("/api", userRoutes);
