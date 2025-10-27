@@ -3,7 +3,6 @@ import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import { chatRoute } from "./routes/chatRoute";
 import { profileRoute } from "./routes/profileRoute";
-import { initializeCache } from "./controllers/flashcardController";
 import { documentRoute } from "./routes/documentRoute";
 import webhookRoute from "./routes/webhookRoute";
 import { leaderboardRoute } from "./routes/leaderboardRoute";
@@ -13,6 +12,8 @@ import quizRoute from "./routes/quizRoute";
 import friendshipRoute from "./routes/friendshipRoute";
 import quizShareRoute from "./routes/quizShareRoute";
 import weeklyStatsRoute from "./routes/weeklyStatsRoute";
+import { connectRedis } from "./lib/redis";
+import userRoutes from "./routes/users";
 
 export const app = new Hono();
 
@@ -32,24 +33,36 @@ app.use(
   })
 );
 
-app.get("/", (c) => {
-  return c.json({ 
-    status: "ok", 
-    message: "Jargon Backend API",
+// Connect to Redis on startup with error handling
+connectRedis()
+  .then(() => console.log("✅ Redis connected successfully"))
+  .catch((err) => {
+    console.error("❌ Redis connection failed:", err);
+    console.log("⚠️  App will continue without caching");
   });
-});
 
+// Health check endpoint (useful for monitoring)
+app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Routes
+app.route("/api", userRoutes);
 app.route("/chat", chatRoute);
 app.route("/profile", profileRoute);
 app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
 app.route("/leaderboard", leaderboardRoute);
-app.route("/learning", learningRoute); 
+app.route("/learning", learningRoute);
 app.route("/ocr", ocrRoute);
 app.route("/quiz", quizRoute);
 app.route("/friendships", friendshipRoute);
 app.route("/quiz-shares", quizShareRoute);
 app.route("/weekly-tracking", weeklyStatsRoute);
 
+// 404 handler
+app.notFound((c) => c.json({ error: "Not Found" }, 404));
 
-// await initializeCache();
+// Error handler
+app.onError((err, c) => {
+  console.error("Error:", err);
+  return c.json({ error: "Internal Server Error" }, 500);
+});

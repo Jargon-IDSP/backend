@@ -2,6 +2,22 @@ import type { Context } from "hono";
 import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { generateCustomFromOCR } from "./helperFunctions/customFlashcardHelper";
+import redisClient from "../lib/redis";
+
+// Helper function to invalidate cache by pattern
+const invalidateCachePattern = async (pattern: string): Promise<void> => {
+  try {
+    const keys = await redisClient.keys(pattern);
+    if (keys.length > 0) {
+      await redisClient.del(keys);
+      console.log(
+        `🗑️  Invalidated ${keys.length} cache keys matching: ${pattern}`
+      );
+    }
+  } catch (error) {
+    console.error(`Error invalidating cache pattern ${pattern}:`, error);
+  }
+};
 
 export const generateCustomForDocument = async (c: Context) => {
   try {
@@ -12,7 +28,7 @@ export const generateCustomForDocument = async (c: Context) => {
     if (!docId) return c.json({ error: "Missing documentId" }, 400);
 
     const body = await c.req.json().catch(() => ({}));
-    const category = body.category || 'GENERAL';
+    const category = body.category || "GENERAL";
 
     const doc = await prisma.document.findUnique({ where: { id: docId } });
     if (!doc) return c.json({ error: "Document not found" }, 404);
@@ -47,8 +63,8 @@ export const generateCustomForDocument = async (c: Context) => {
     const quizData = {
       id: crypto.randomUUID(),
       userId: user.id,
-      documentId: doc.id,  
-      name: doc.filename,  
+      documentId: doc.id,
+      name: doc.filename,
       category: category,
       pointsPerQuestion: 10,
       createdAt: new Date(),
@@ -106,6 +122,26 @@ export const generateCustomForDocument = async (c: Context) => {
       ...toSaveCards.map((data) => prisma.customFlashcard.create({ data })),
       ...toSaveQs.map((data) => prisma.customQuestion.create({ data })),
     ]);
+
+    // ✅ INVALIDATE CACHES after successful generation
+    // This ensures users see their newly generated flashcards and questions
+    console.log("🔄 Invalidating caches after custom generation...");
+    await Promise.all([
+      // Invalidate custom flashcard caches for this user
+      invalidateCachePattern(`custom:user:${user.id}:*`),
+      invalidateCachePattern(`custom:category:${user.id}:*`),
+
+      // Invalidate custom flashcard caches for this document
+      invalidateCachePattern(`custom:document:${doc.id}:*`),
+
+      // Invalidate custom question caches for this user
+      invalidateCachePattern(`questions:user:${user.id}:*`),
+      invalidateCachePattern(`questions:document:${doc.id}:*`),
+
+      // Invalidate custom quiz caches
+      invalidateCachePattern(`quizzes:user:${user.id}:*`),
+    ]);
+    console.log("✅ Cache invalidation complete");
 
     return c.json({
       ok: true,

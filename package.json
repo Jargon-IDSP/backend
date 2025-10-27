@@ -35,8 +35,10 @@
     "form-data": "^4.0.4",
     "hono": "^4.9.6",
     "mysql": "^2.18.1",
+    "mysql2": "^3.15.3",
     "node-cache": "^5.1.2",
     "prisma": "^6.16.2",
+    "redis": "^5.9.0",
     "svix": "^1.77.0"
   },
   "devDependencies": {

@@ -25,6 +25,7 @@ import {
   getCustomQuizzesByUser,
   getCustomQuizzesByCategory,
   getCustomQuizById,
+  getCustomQuizByDocument, // Added this new function
   generateQuizForLevel,
   generateCustomQuiz,
   completeQuiz,
@@ -61,73 +62,69 @@ learningRoute.use("*", authMiddleware);
 const existingRoutes = new Hono()
   .get("/levels", getLevels)
   .get("/levels/:levelId", getLevels)
-  
+
   .get("/levels/:levelId/terms", getPracticeTermsByLevel)
   .get("/levels/:levelId/questions", getQuestionsByLevel)
   .get("/levels/:levelId/quizzes", getQuizzesByLevel)
   .get("/levels/:levelId/quiz/generate", generateQuizForLevel)
-  
+
   // Legacy endpoints
-  .get("/random/flashcard", getRandomFlashcard) 
+  .get("/random/flashcard", getRandomFlashcard)
   .get("/random/question", getRandomQuestion);
 
-
 const customRoutes = new Hono()
-  .get("/overview", getCustomFlashcardsByUser) 
-  .get("/shared", getSharedWithMe)             
-  
+  .get("/overview", getCustomFlashcardsByUser)
+  .get("/shared", getSharedWithMe)
+
   .get("/categories/:category/terms", getCustomFlashcardsByCategory)
   .get("/categories/:category/questions", getCustomQuestionsByCategory)
   .get("/categories/:category/quizzes", getCustomQuizzesByCategory)
-  
+
   .get("/terms", getCustomFlashcardsByUser)
   .get("/questions", getCustomQuestionsByUser)
   .get("/quizzes", getCustomQuizzesByUser)
-  
+
   .get("/random/flashcard", getRandomCustomFlashcard)
   .get("/random/question", getRandomCustomQuestion)
-  
+
   .get("/quiz/generate", generateCustomQuiz);
 
-
 const documentLearningRoutes = new Hono()
-  .get("/:documentId/overview", getCustomQuizById)     
+  .get("/:documentId/overview", getCustomQuizByDocument) // Changed from getCustomQuizById
   .get("/:documentId/terms", getCustomFlashcardsByDocument)
   .get("/:documentId/questions", getCustomQuestionsByDocument)
   .get("/:documentId/quizzes", getCustomQuizzesByDocument);
-
 
 const quizAttemptRoutes = new Hono()
   .get("/:customQuizId", getQuiz)
   .get("/:customQuizId/translate", translateQuiz)
   .get("/questions/:questionId", getQuestion)
   .get("/questions/:questionId/translate", translateQuestion)
-  
+
   .post("/start", startAttempt)
   .post("/:attemptId/answer", submitAnswer)
   .post("/:customQuizId/retry", retryAttempt)
-  .post("/complete", completeQuiz)  // Legacy
-  
+  .post("/complete", completeQuiz) // Legacy
+
   .get("/:customQuizId/current", getCurrentAttempt)
   .get("/:customQuizId/history", getAttemptHistory)
   .get("/:customQuizId/attempts", getAllAttempts)
   .get("/in-progress", getInProgressAttempts)
-  
-  .get("/stats/user", getStats);
 
+  .get("/stats/user", getStats);
 
 const sharingRoutes = new Hono()
   .post("/share", shareQuiz)
   .post("/share-multiple", shareWithMultiple)
   .delete("/:shareId", unshareQuiz)
-  
+
   .get("/quiz/:quizId/shares", getQuizShares)
   .get("/shared-with-me", getSharedWithMe)
   .get("/my-shared", getMySharedQuizzes);
 
 learningRoute.route("/existing", existingRoutes);
 learningRoute.route("/custom", customRoutes);
-learningRoute.route("/documents", documentLearningRoutes); 
+learningRoute.route("/documents", documentLearningRoutes);
 learningRoute.route("/attempts", quizAttemptRoutes);
 learningRoute.route("/sharing", sharingRoutes);
 

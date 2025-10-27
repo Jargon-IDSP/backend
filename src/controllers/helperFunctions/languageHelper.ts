@@ -1,15 +1,55 @@
 import type { Langs } from "../../interfaces/customFlashcard";
 import { prisma } from "../../lib/prisma";
+import redisClient from "../../lib/redis";
 
+// Helper function to get from cache
+const getFromCache = async <T>(key: string): Promise<T | null> => {
+  try {
+    const cached = await redisClient.get(key);
+    if (cached) {
+      return JSON.parse(cached) as T;
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error getting cache for ${key}:`, error);
+    return null;
+  }
+};
+
+// Helper function to set cache
+const setCache = async <T>(
+  key: string,
+  data: T,
+  ttl: number = 300
+): Promise<void> => {
+  try {
+    await redisClient.setEx(key, ttl, JSON.stringify(data));
+  } catch (error) {
+    console.error(`Error setting cache for ${key}:`, error);
+  }
+};
 
 export async function getUserLanguage(userId: string): Promise<Langs> {
   try {
+    // Check cache first
+    const cacheKey = `user:language:${userId}`;
+    const cached = await getFromCache<Langs>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Query database if not cached
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { language: true }
+      select: { language: true },
     });
-    
-    return normalizeLanguage(user?.language || "english");
+
+    const language = normalizeLanguage(user?.language || "english");
+
+    // Cache for 1 hour (user language doesn't change often)
+    await setCache(cacheKey, language, 3600);
+
+    return language;
   } catch (error) {
     console.error("Error fetching user language:", error);
     return "english";
@@ -17,34 +57,41 @@ export async function getUserLanguage(userId: string): Promise<Langs> {
 }
 
 export async function getUserLanguageFromContext(c: any): Promise<Langs> {
-  const user = c.get('user');
+  const user = c.get("user");
   if (user?.language) {
     return normalizeLanguage(user.language);
   }
-  
-  const userId = c.get('userId');
+
+  const userId = c.get("userId");
   if (userId) {
     return await getUserLanguage(userId);
   }
-  
+
   return "english";
 }
 
 export function normalizeLanguage(language: string): Langs {
   const normalized = language.toLowerCase();
-  const validLanguages: Langs[] = ["english", "french", "chinese", "spanish", "tagalog", "punjabi", "korean"];
-  
+  const validLanguages: Langs[] = [
+    "english",
+    "french",
+    "chinese",
+    "spanish",
+    "tagalog",
+    "punjabi",
+    "korean",
+  ];
+
   if (validLanguages.includes(normalized as Langs)) {
     return normalized as Langs;
   }
-  
-  return "english"; 
-}
 
+  return "english";
+}
 
 export function getLanguageFields(language: Langs) {
   const capitalizedLang = language.charAt(0).toUpperCase() + language.slice(1);
-  
+
   return {
     term: `term${capitalizedLang}` as const,
     definition: `definition${capitalizedLang}` as const,
@@ -53,11 +100,13 @@ export function getLanguageFields(language: Langs) {
   };
 }
 
-
-export function transformFlashcard(flashcard: any, userLanguage: Langs = "english") {
+export function transformFlashcard(
+  flashcard: any,
+  userLanguage: Langs = "english"
+) {
   const englishFields = getLanguageFields("english");
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: flashcard.id,
     term: {
@@ -65,7 +114,10 @@ export function transformFlashcard(flashcard: any, userLanguage: Langs = "englis
       [userLanguage]: flashcard[userFields.term] || "",
     },
     definition: {
-      english: flashcard.definitionEnglish || flashcard[englishFields.definition] || "",
+      english:
+        flashcard.definitionEnglish ||
+        flashcard[englishFields.definition] ||
+        "",
       [userLanguage]: flashcard[userFields.definition] || "",
     },
     ...(flashcard.industryId && { industryId: flashcard.industryId }),
@@ -75,8 +127,11 @@ export function transformFlashcard(flashcard: any, userLanguage: Langs = "englis
   };
 }
 
-export function transformFlashcards(flashcards: any[], userLanguage: Langs = "english") {
-  return flashcards.map(fc => transformFlashcard(fc, userLanguage));
+export function transformFlashcards(
+  flashcards: any[],
+  userLanguage: Langs = "english"
+) {
+  return flashcards.map((fc) => transformFlashcard(fc, userLanguage));
 }
 
 export function transformFlashcardAllLanguages(flashcard: any) {
@@ -107,9 +162,12 @@ export function transformFlashcardAllLanguages(flashcard: any) {
   };
 }
 
-export function transformQuestion(question: any, userLanguage: Langs = "english") {
+export function transformQuestion(
+  question: any,
+  userLanguage: Langs = "english"
+) {
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: question.id,
     correctTermId: question.correctTermId,
@@ -124,8 +182,11 @@ export function transformQuestion(question: any, userLanguage: Langs = "english"
   };
 }
 
-export function transformQuestions(questions: any[], userLanguage: Langs = "english") {
-  return questions.map(q => transformQuestion(q, userLanguage));
+export function transformQuestions(
+  questions: any[],
+  userLanguage: Langs = "english"
+) {
+  return questions.map((q) => transformQuestion(q, userLanguage));
 }
 
 export function transformQuestionAllLanguages(question: any) {
@@ -148,10 +209,9 @@ export function transformQuestionAllLanguages(question: any) {
   };
 }
 
-
 export function getFlashcardSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: true,
     termEnglish: true,
@@ -169,7 +229,7 @@ export function getFlashcardSelect(userLanguage: Langs = "english") {
 
 export function getCustomFlashcardSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: true,
     termEnglish: true,
@@ -185,7 +245,7 @@ export function getCustomFlashcardSelect(userLanguage: Langs = "english") {
 
 export function getQuestionSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: true,
     correctTermId: true,
@@ -204,7 +264,7 @@ export function getQuestionSelect(userLanguage: Langs = "english") {
 
 export function getCustomQuestionSelect(userLanguage: Langs = "english") {
   const userFields = getLanguageFields(userLanguage);
-  
+
   return {
     id: true,
     correctTermId: true,
@@ -249,4 +309,17 @@ export function getAllQuestionLanguageFields() {
     promptPunjabi: true,
     promptKorean: true,
   };
+}
+
+// Utility to invalidate user language cache when user updates their language preference
+export async function invalidateUserLanguageCache(
+  userId: string
+): Promise<void> {
+  try {
+    const cacheKey = `user:language:${userId}`;
+    await redisClient.del(cacheKey);
+    console.log(`🗑️  User language cache invalidated for user: ${userId}`);
+  } catch (error) {
+    console.error(`Error invalidating user language cache:`, error);
+  }
 }

@@ -74,6 +74,7 @@ model Flashcard {
   
   @@index([levelId, industryId])
   @@index([industryId, levelId])
+  @@index([levelId])
   @@index([termEnglish(length: 255)])
   @@map("flashcards")
 }
@@ -125,6 +126,7 @@ model Document {
   
   @@index([userId])
   @@index([createdAt])
+  @@index([userId, createdAt])  // 👈 ADDED - speeds up user document queries
   @@map("documents")
 }
 
@@ -246,6 +248,7 @@ model CustomQuiz {
   @@index([userId])
   @@index([category])
   @@index([documentId])
+  @@index([userId, createdAt])  // 👈 ADDED - speeds up user quiz queries
   @@map("custom_quizzes")
 }
 
@@ -300,6 +303,7 @@ model UserQuizAttempt {
   @@index([userId, completed])
   @@index([userId, customQuizId]) 
   @@index([userId, levelId])
+  @@index([userId, completedAt])  // 👈 ADDED - speeds up history queries
   @@map("user_quiz_attempts")
 }
 
