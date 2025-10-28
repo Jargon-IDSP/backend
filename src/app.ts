@@ -15,6 +15,8 @@ import weeklyStatsRoute from "./routes/weeklyStatsRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
+import redisClient from "./lib/redis";
+
 export const app = new Hono();
 
 app.use("*", logger());
@@ -49,6 +51,18 @@ app.get("/", (c) =>
   })
 );
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Add this temporary endpoint
+app.get("/admin/clear-cache", async (c) => {
+  try {
+    await redisClient.flushAll();
+    return c.json({ success: true, message: "Cache cleared successfully" });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    return c.json({ success: false, error: errorMessage }, 500);
+  }
+});
 
 // Routes
 app.route("/api", userRoutes);
