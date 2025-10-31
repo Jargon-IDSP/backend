@@ -16,6 +16,7 @@ export const profile = async (c: Context) => {
       username: true,
       language: true,
       industryId: true,
+      onboardingCompleted: true,
       score: true,
       createdAt: true,
       updatedAt: true,
@@ -69,6 +70,7 @@ export const updateOnboarding = async (c: Context) => {
       data: {
         language: language ? language.toLowerCase() : undefined,
         industryId: industryId !== null ? industryId : undefined,
+        onboardingCompleted: true,
       },
       select: {
         id: true,
@@ -78,6 +80,7 @@ export const updateOnboarding = async (c: Context) => {
         username: true,
         language: true,
         industryId: true,
+        onboardingCompleted: true,
         score: true,
       }
     });

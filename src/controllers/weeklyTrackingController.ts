@@ -1,21 +1,30 @@
 import { prisma } from "../lib/prisma";
 import type { UserWeeklyStats } from "../interfaces/weeklyData";
 
-export function getCurrentWeekStart(): Date {
+// Get current date in PST timezone
+export function getPSTDate(): Date {
   const now = new Date();
-  const dayOfWeek = now.getUTCDay(); 
-  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
-  
+  // Convert to PST timezone string, then create a new Date
+  const pstString = now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+  return new Date(pstString);
+}
+
+export function getCurrentWeekStart(): Date {
+  const now = getPSTDate();
+  const dayOfWeek = now.getDay();
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
   const monday = new Date(now);
-  monday.setUTCDate(now.getUTCDate() - daysToMonday);
-  monday.setUTCHours(0, 0, 0, 0);
-  
+  monday.setDate(now.getDate() - daysToMonday);
+  monday.setHours(0, 0, 0, 0);
+
   return monday;
 }
 
-export function getDayAbbreviation(date: Date = new Date()): string {
+export function getDayAbbreviation(date?: Date): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const day = days[date.getUTCDay()];
+  const targetDate = date || getPSTDate();
+  const day = days[targetDate.getDay()];
   return day ?? 'Sun';
 }
 

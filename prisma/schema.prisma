@@ -355,8 +355,9 @@ model User {
   firstName String?
   lastName  String?
   username  String?
-  language  String   @default("english")  
-  industryId Int?                        
+  language  String   @default("english")
+  industryId Int?
+  onboardingCompleted Boolean @default(false)
   score     Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
