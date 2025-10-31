@@ -27,6 +27,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:3000",
       "https://frontend-cl3c.onrender.com",
+      "https://www.jargon-app.ca",
       "https://backend-84zo.onrender.com",
     ],
     credentials: true,
