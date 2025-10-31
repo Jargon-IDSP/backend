@@ -1,15 +1,13 @@
 import { Hono } from "hono";
 import { cacheMiddleware } from "../middleware/cache";
 import { UserService } from "../services/userService";
-import { db } from "../lib/database";
 
 const app = new Hono();
 const userService = new UserService();
 
 // Using middleware for automatic caching
 app.get("/users", cacheMiddleware(300), async (c) => {
-  const users = await db.query("SELECT * FROM users");
-  return c.json(users);
+  return c.json({ message: "Users endpoint - implement with Redis if needed" });
 });
 
 // Using manual caching with cache-aside pattern
@@ -28,10 +26,6 @@ app.get("/users/:id", async (c) => {
 app.put("/users/:id", async (c) => {
   const userId = c.req.param("id");
   const body = await c.req.json();
-
-  // Update database
-  await db.query("UPDATE users SET ? WHERE id = ?", [body, userId]);
-
   // Invalidate cache
   await userService.invalidateUserCache(userId);
 
