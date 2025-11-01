@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
-import { getLeaderboard } from '../controllers/leaderboardController';
+import { authMiddleware } from '../middleware/authMiddleware';
+import { getLeaderboard, getFriendsLeaderboard } from '../controllers/leaderboardController';
 
 export const leaderboardRoute = new Hono()
-  .get('/', getLeaderboard);
+  .get('/', getLeaderboard)
+  .use('/friends', authMiddleware)
+  .get('/friends', getFriendsLeaderboard);
