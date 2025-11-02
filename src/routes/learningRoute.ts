@@ -30,6 +30,7 @@ import {
   generateQuizForLevel,
   generateCustomQuiz,
   completeQuiz,
+  getAllCategories,
 } from "../controllers/questionController";
 
 import {
@@ -77,6 +78,7 @@ const customRoutes = new Hono()
   .get("/overview", getCustomFlashcardsByUser)
   .get("/shared", getSharedWithMe)
 
+  .get("/categories", getAllCategories)
   .get("/categories/:category/terms", getCustomFlashcardsByCategory)
   .get("/categories/:category/questions", getCustomQuestionsByCategory)
   .get("/categories/:category/quizzes", getCustomQuizzesByCategory)

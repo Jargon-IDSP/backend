@@ -224,7 +224,7 @@ model CustomQuestion {
 
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   category      Category        @relation(fields: [categoryId], references: [id])
-  correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
+  correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id], onDelete: Cascade)
   customQuiz    CustomQuiz?     @relation(fields: [customQuizId], references: [id], onDelete: SetNull)
   userAnswers   UserQuizAnswer[]
 

@@ -1313,3 +1313,57 @@ export const getCustomQuizzesByUser = async (c: Context) => {
     );
   }
 };
+
+export const getAllCategories = async (c: Context) => {
+  try {
+    const user = c.get("user");
+
+    // Check cache first
+    const cacheKey = `categories:all:${user.id}`;
+    const cached = await getFromCache<any>(cacheKey);
+    if (cached) {
+      return c.json(cached);
+    }
+
+    // Get all categories with document counts for this user
+    const categories = await prisma.category.findMany({
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            documents: {
+              where: {
+                userId: user.id,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        name: 'asc',
+      },
+    });
+
+    const categoriesWithCounts = categories.map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      documentCount: cat._count.documents,
+    }));
+
+    const response = successResponse(
+      { categories: categoriesWithCounts },
+      {
+        count: categoriesWithCounts.length,
+      }
+    );
+
+    // Cache for 5 minutes
+    await setCache(cacheKey, response, 300);
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching categories:", error);
+    return errorResponse(c, "Failed to fetch categories");
+  }
+};
