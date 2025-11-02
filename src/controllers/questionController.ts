@@ -936,6 +936,105 @@ export const getCustomQuizzesByCategory = async (c: Context) => {
   }
 };
 
+export const getDocumentsByCategory = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const { category } = c.req.param();
+
+    if (!category) {
+      return errorResponse(c, "Category is required", 400);
+    }
+
+    // Map category name to ID
+    const categoryMap: Record<string, number> = {
+      'safety': 1,
+      'technical': 2,
+      'training': 3,
+      'workplace': 4,
+      'professional': 5,
+      'general': 6,
+    };
+
+    const categoryId = categoryMap[category.toLowerCase()];
+    if (!categoryId) {
+      return errorResponse(c, "Invalid category", 400);
+    }
+
+    // Check cache first
+    const cacheKey = `documents:category:${user.id}:${categoryId}`;
+    const cached = await getFromCache<any>(cacheKey);
+    if (cached) {
+      return c.json(cached);
+    }
+
+    // Now we can simply query documents by categoryId - much cleaner!
+    const documents = await prisma.document.findMany({
+      where: {
+        userId: user.id,
+        categoryId: categoryId,
+      },
+      select: {
+        id: true,
+        filename: true,
+        ocrProcessed: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            flashcards: true,
+            customQuizzes: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Get question count for each document
+    const documentsWithCounts = await Promise.all(
+      documents.map(async (doc) => {
+        const questionCount = await prisma.customQuestion.count({
+          where: {
+            customQuiz: {
+              documentId: doc.id,
+            },
+          },
+        });
+
+        return {
+          id: doc.id,
+          filename: doc.filename,
+          ocrProcessed: doc.ocrProcessed,
+          category: doc.category.name,
+          flashcardCount: doc._count.flashcards,
+          questionCount: questionCount,
+        };
+      })
+    );
+
+    const response = successResponse(
+      { documents: documentsWithCounts },
+      {
+        count: documentsWithCounts.length,
+        category: category,
+      }
+    );
+
+    // Cache for 2 minutes
+    await setCache(cacheKey, response, 120);
+
+    return c.json(response);
+  } catch (error) {
+    console.error("Error fetching documents by category:", error);
+    return errorResponse(c, "Failed to fetch documents by category");
+  }
+};
+
 export const getCustomQuizById = async (c: Context) => {
   try {
     const user = c.get("user");

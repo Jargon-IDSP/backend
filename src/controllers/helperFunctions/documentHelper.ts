@@ -96,7 +96,7 @@ ${ocrText.slice(0, 8000)}
 
 
 
-export async function categorizeDocument(ocrText: string): Promise<QuizCategory> {
+export async function categorizeDocument(ocrText: string): Promise<number> {
   const categoryPrompt = `
 Analyze the following text and categorize it into ONE of these categories:
 - Safety: Safety procedures, hazard warnings, protective equipment
@@ -117,34 +117,37 @@ ${ocrText.slice(0, 3000)}
   const responseText = await callGenAI(categoryPrompt);
   const normalized = responseText.trim();
 
-  const validCategories: QuizCategory[] = [
-    "Safety",
-    "Technical",
-    "Training",
-    "Workplace",
-    "Professional",
-    "General",
-  ];
+  // Map category name to ID
+  const categoryMap: Record<string, number> = {
+    'Safety': 1,
+    'Technical': 2,
+    'Training': 3,
+    'Workplace': 4,
+    'Professional': 5,
+    'General': 6,
+  };
 
-  for (const category of validCategories) {
-    if (normalized === category) {
-      return category as QuizCategory;
+  // Try exact match first
+  if (categoryMap[normalized]) {
+    return categoryMap[normalized];
+  }
+
+  // Try case-insensitive match
+  for (const [name, id] of Object.entries(categoryMap)) {
+    if (normalized.toLowerCase() === name.toLowerCase()) {
+      return id;
     }
   }
 
-  for (const category of validCategories) {
-    if (normalized.toLowerCase() === category.toLowerCase()) {
-      return category as QuizCategory;
+  // Try partial match
+  for (const [name, id] of Object.entries(categoryMap)) {
+    if (normalized.toLowerCase().includes(name.toLowerCase())) {
+      return id;
     }
   }
 
-  for (const category of validCategories) {
-    if (normalized.toLowerCase().includes(category.toLowerCase())) {
-      return category as QuizCategory;
-    }
-  }
-
-  return "General";
+  // Default to General
+  return 6;
 }
 
 
@@ -152,34 +155,18 @@ export function createQuizData(
   documentId: string,
   userId: string,
   filename: string,
-  category: QuizCategory = "General"
+  categoryId: number = 6 // Default to General
 ) {
   return {
     id: crypto.randomUUID(),
     userId,
     documentId,
     name: filename,
-    category,
+    categoryId,
     pointsPerQuestion: 10,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
-}
-
-
-export function getCategoryColor(category: QuizCategory | null): string {
-  if (!category) return "#6B7280";
-  
-  const colors: Record<QuizCategory, string> = {
-    Safety: "#EF4444",       
-    Technical: "#3B82F6",    
-    Training: "#8B5CF6",     
-    Workplace: "#10B981",   
-    Professional: "#F59E0B", 
-    General: "#6B7280",     
-  };
-  
-  return colors[category] || "#6B7280";
 }
 
 async function downloadFileFromS3(fileKey: string): Promise<string> {
@@ -296,12 +283,14 @@ export async function getExistingTerms(userId: string): Promise<string[]> {
 export function transformToFlashcardData(
   terms: any[],
   documentId: string,
-  userId: string
+  userId: string,
+  categoryId: number = 6
 ) {
   return terms.map((t) => ({
     id: crypto.randomUUID(),
     documentId,
     userId,
+    categoryId,
     termEnglish: t.term.term.english,
     termFrench: t.term.term.french,
     termChinese: t.term.term.chinese,
@@ -326,7 +315,8 @@ export function transformToQuestionData(
   questions: any[],
   indexToIdMap: Map<number, string>,
   quizId: string,
-  userId: string
+  userId: string,
+  categoryId: number = 6
 ) {
   return questions.map((q, i) => {
     const index = Number(q.correctTermId) || i + 1;
@@ -337,6 +327,7 @@ export function transformToQuestionData(
       userId,
       customQuizId: quizId,
       correctTermId: correctId,
+      categoryId,
       promptEnglish: q.prompt.english,
       promptFrench: q.prompt.french,
       promptChinese: q.prompt.chinese,

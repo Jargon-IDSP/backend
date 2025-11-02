@@ -181,21 +181,32 @@ async function generateFlashcardsAndQuestions(
       existingDbTermsEnglish,
     });
 
-    const quizData = createQuizData(documentId, userId, document.filename);
+    // Categorize the document content
+    const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+    const categoryId = await categorizeDocument(document.extractedText);
+    console.log(`📁 Document categorized as category ID: ${categoryId}`);
+
+    const quizData = createQuizData(documentId, userId, document.filename, categoryId);
     const flashcardData = transformToFlashcardData(
       generation.terms,
       documentId,
-      userId
+      userId,
+      categoryId
     );
     const indexToIdMap = createIndexToIdMap(flashcardData);
     const questionData = transformToQuestionData(
       generation.questions,
       indexToIdMap,
       quizData.id,
-      userId
+      userId,
+      categoryId
     );
 
     await prisma.$transaction([
+      prisma.document.update({
+        where: { id: documentId },
+        data: { categoryId, ocrProcessed: true }
+      }),
       prisma.customQuiz.create({ data: quizData }),
       ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
       ...questionData.map((data) => prisma.customQuestion.create({ data })),
@@ -204,11 +215,6 @@ async function generateFlashcardsAndQuestions(
     console.log(
       `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`
     );
-
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { ocrProcessed: true },
-    });
 
     // Invalidate all related caches after flashcard generation
     console.log("🔄 Invalidating caches after flashcard generation...");

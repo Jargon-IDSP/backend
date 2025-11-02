@@ -24,6 +24,7 @@ import {
   getCustomQuizzesByDocument,
   getCustomQuizzesByUser,
   getCustomQuizzesByCategory,
+  getDocumentsByCategory,
   getCustomQuizById,
   getCustomQuizByDocument, // Added this new function
   generateQuizForLevel,
@@ -79,6 +80,7 @@ const customRoutes = new Hono()
   .get("/categories/:category/terms", getCustomFlashcardsByCategory)
   .get("/categories/:category/questions", getCustomQuestionsByCategory)
   .get("/categories/:category/quizzes", getCustomQuizzesByCategory)
+  .get("/quizzes/by-category/:category", getDocumentsByCategory)
 
   .get("/terms", getCustomFlashcardsByUser)
   .get("/questions", getCustomQuestionsByUser)

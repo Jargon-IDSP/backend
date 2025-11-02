@@ -16,13 +16,16 @@ enum FriendshipStatus {
   BLOCKED
 }
 
-enum QuizCategory {
-  Safety      
-  Technical  
-  Training    
-  Workplace   
-  Professional 
-  General     
+model Category {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  documents        Document[]
+  customFlashcards CustomFlashcard[]
+  customQuestions  CustomQuestion[]
+  customQuizzes    CustomQuiz[]
+
+  @@map("categories")
 }
 
 model Industry {
@@ -116,17 +119,21 @@ model Document {
   extractedText String?   @db.Text
   ocrProcessed  Boolean   @default(false)
   userId        String
+  categoryId    Int       @default(6) // Default to General category
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
+
   user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category      Category            @relation(fields: [categoryId], references: [id])
   flashcards    CustomFlashcard[]
   customQuizzes CustomQuiz[]
   translation   DocumentTranslation?
-  
+
   @@index([userId])
+  @@index([categoryId])
   @@index([createdAt])
-  @@index([userId, createdAt])  // 👈 ADDED - speeds up user document queries
+  @@index([userId, createdAt])
+  @@index([userId, categoryId])
   @@map("documents")
 }
 
@@ -158,11 +165,11 @@ model DocumentTranslation {
 
 model CustomFlashcard {
   id String @id @default(cuid())
-  
+
   documentId String?
   userId     String
-  category   QuizCategory @default(General)
-  
+  categoryId Int      @default(6) // Default to General category
+
   termEnglish  String @db.Text
   termFrench   String @db.Text
   termChinese  String @db.Text
@@ -170,7 +177,7 @@ model CustomFlashcard {
   termTagalog  String @db.Text
   termPunjabi  String @db.Text
   termKorean   String @db.Text
-  
+
   definitionEnglish  String @db.Text
   definitionFrench   String @db.Text
   definitionChinese  String @db.Text
@@ -178,30 +185,31 @@ model CustomFlashcard {
   definitionTagalog  String @db.Text
   definitionPunjabi  String @db.Text
   definitionKorean   String @db.Text
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document    Document?           @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  category    Category            @relation(fields: [categoryId], references: [id])
+  document    Document?           @relation(fields: [documentId], references: [id], onDelete: Cascade)
   questions   CustomQuestion[]    @relation("CustomQuestionCorrectAnswer")
   userAnswers UserQuizAnswer[]    @relation("UserQuizAnswers")
 
   @@index([userId, createdAt])
   @@index([documentId, createdAt])
-  @@index([category])
+  @@index([categoryId])
   @@index([termEnglish(length: 255)])
   @@map("custom_flashcards")
 }
 
 model CustomQuestion {
   id String @id @default(cuid())
-  
-  userId String
-  customQuizId String?  
+
+  userId        String
+  customQuizId  String?
   correctTermId String
-  category QuizCategory @default(General)
-  
+  categoryId    Int      @default(6) // Default to General category
+
   promptEnglish  String @db.Text
   promptFrench   String @db.Text
   promptChinese  String @db.Text
@@ -209,46 +217,49 @@ model CustomQuestion {
   promptTagalog  String @db.Text
   promptPunjabi  String @db.Text
   promptKorean   String @db.Text
-  
+
   pointsWorth Int @default(10)
-    
+
   createdAt DateTime @default(now())
-  
+
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category      Category        @relation(fields: [categoryId], references: [id])
   correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id])
   customQuiz    CustomQuiz?     @relation(fields: [customQuizId], references: [id], onDelete: SetNull)
-  userAnswers   UserQuizAnswer[] 
-  
+  userAnswers   UserQuizAnswer[]
+
   @@index([userId, createdAt])
   @@index([customQuizId, createdAt])
-  @@index([category])
+  @@index([categoryId])
   @@index([correctTermId])
   @@map("custom_questions")
 }
 
 model CustomQuiz {
   id String @id @default(cuid())
-  
-  userId     String   
+
+  userId     String
   documentId String?
-  name       String           
-  category   QuizCategory?     
-  
+  name       String
+  categoryId Int      @default(6) // Default to General category
+
   pointsPerQuestion Int @default(10)
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document   Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  category   Category          @relation(fields: [categoryId], references: [id])
+  document   Document?         @relation(fields: [documentId], references: [id], onDelete: Cascade)
   questions  CustomQuestion[]
   sharedWith CustomQuizShare[]
-  attempts   UserQuizAttempt[] 
-  
+  attempts   UserQuizAttempt[]
+
   @@index([userId])
-  @@index([category])
+  @@index([categoryId])
   @@index([documentId])
-  @@index([userId, createdAt])  // 👈 ADDED - speeds up user quiz queries
+  @@index([userId, createdAt])
+  @@index([userId, categoryId])
   @@map("custom_quizzes")
 }
 

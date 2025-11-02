@@ -62,6 +62,9 @@ async function migrateUsersFromClerk() {
           continue;
         }
 
+        // Generate random score between 0 and 5000
+        const randomScore = Math.floor(Math.random() * 5001);
+
         await prisma.user.create({
           data: {
             id: clerkUser.id,
@@ -69,7 +72,7 @@ async function migrateUsersFromClerk() {
             firstName: clerkUser.firstName || null,
             lastName: clerkUser.lastName || null,
             username: clerkUser.username || null,
-            score: 0,
+            score: randomScore,
             createdAt: new Date(clerkUser.createdAt),
             updatedAt: new Date(clerkUser.updatedAt),
           },

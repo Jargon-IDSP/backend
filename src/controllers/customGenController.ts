@@ -28,7 +28,16 @@ export const generateCustomForDocument = async (c: Context) => {
     if (!docId) return c.json({ error: "Missing documentId" }, 400);
 
     const body = await c.req.json().catch(() => ({}));
-    const category = body.category || "GENERAL";
+
+    // Map category name to ID if provided, otherwise use document's category or default to General
+    const categoryMap: Record<string, number> = {
+      'SAFETY': 1, 'safety': 1,
+      'TECHNICAL': 2, 'technical': 2,
+      'TRAINING': 3, 'training': 3,
+      'WORKPLACE': 4, 'workplace': 4,
+      'PROFESSIONAL': 5, 'professional': 5,
+      'GENERAL': 6, 'general': 6,
+    };
 
     const doc = await prisma.document.findUnique({ where: { id: docId } });
     if (!doc) return c.json({ error: "Document not found" }, 404);
@@ -39,6 +48,11 @@ export const generateCustomForDocument = async (c: Context) => {
         400
       );
     }
+
+    // Use category from body if provided, otherwise use document's category
+    const categoryId = body.category
+      ? (categoryMap[body.category] || doc.categoryId || 6)
+      : (doc.categoryId || 6);
 
     const [core, custom] = await Promise.all([
       prisma.flashcard.findMany({ select: { termEnglish: true } }),
@@ -65,7 +79,7 @@ export const generateCustomForDocument = async (c: Context) => {
       userId: user.id,
       documentId: doc.id,
       name: doc.filename,
-      category: category,
+      categoryId: categoryId,
       pointsPerQuestion: 10,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -75,6 +89,7 @@ export const generateCustomForDocument = async (c: Context) => {
       id: crypto.randomUUID(),
       documentId: doc.id,
       userId: user.id,
+      categoryId: categoryId,
       termEnglish: t.term.term.english,
       termFrench: t.term.term.french,
       termChinese: t.term.term.chinese,
@@ -105,6 +120,7 @@ export const generateCustomForDocument = async (c: Context) => {
         userId: user.id,
         customQuizId: quizData.id,
         correctTermId: correctId,
+        categoryId: categoryId,
         promptEnglish: q.prompt.english,
         promptFrench: q.prompt.french,
         promptChinese: q.prompt.chinese,
