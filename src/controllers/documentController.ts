@@ -126,7 +126,8 @@ async function translateDocument(
 
 async function generateFlashcardsAndQuestions(
   documentId: string,
-  userId: string
+  userId: string,
+  providedCategoryId?: number | null
 ) {
   try {
     console.log(`\n${"=".repeat(60)}`);
@@ -151,6 +152,7 @@ async function generateFlashcardsAndQuestions(
         id: true,
         extractedText: true,
         filename: true,
+        categoryId: true,
       },
     });
 
@@ -181,10 +183,19 @@ async function generateFlashcardsAndQuestions(
       existingDbTermsEnglish,
     });
 
-    // Categorize the document content
-    const { categorizeDocument } = await import("./helperFunctions/documentHelper");
-    const categoryId = await categorizeDocument(document.extractedText);
-    console.log(`📁 Document categorized as category ID: ${categoryId}`);
+    // Use provided categoryId if available, otherwise use AI categorization
+    let categoryId: number;
+    if (providedCategoryId) {
+      categoryId = providedCategoryId;
+      console.log(`📁 Using user-selected category ID: ${categoryId}`);
+    } else if (document.categoryId) {
+      categoryId = document.categoryId;
+      console.log(`📁 Using existing category ID: ${categoryId}`);
+    } else {
+      const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+      categoryId = await categorizeDocument(document.extractedText);
+      console.log(`📁 AI categorized document as category ID: ${categoryId}`);
+    }
 
     const quizData = createQuizData(documentId, userId, document.filename, categoryId);
     const flashcardData = transformToFlashcardData(
@@ -226,6 +237,7 @@ async function generateFlashcardsAndQuestions(
       invalidateCachePattern(`quizzes:user:${userId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
       invalidateCachePattern(`documents:user:${userId}`),
+      invalidateCachePattern(`documents:category:${categoryId}:*`),
     ]);
     console.log("✅ Cache invalidation complete");
 
@@ -278,7 +290,7 @@ export const getUploadUrl = async (c: Context) => {
 
 export const saveDocument = async (c: Context) => {
   try {
-    const { fileKey, filename, fileType, fileSize, extractedText } =
+    const { fileKey, filename, fileType, fileSize, extractedText, categoryId } =
       await c.req.json();
 
     const user = c.get("user");
@@ -296,11 +308,15 @@ export const saveDocument = async (c: Context) => {
         extractedText: extractedText || null,
         ocrProcessed: false,
         userId: user.id,
+        categoryId: categoryId || 6, // Default to General category (ID: 6)
       },
     });
 
     // Invalidate user's document list cache
     await invalidateCachePattern(`documents:user:${user.id}`);
+    if (categoryId) {
+      await invalidateCachePattern(`documents:category:${categoryId}:*`);
+    }
 
     const ocrSupportedTypes = ["application/pdf", "image/jpeg", "image/png"];
     if (ocrSupportedTypes.includes(fileType)) {
@@ -316,7 +332,7 @@ export const saveDocument = async (c: Context) => {
             translateDocument(document.id, user.id, extractedText)
               .then(() => {
                 console.log(`✅ Translation completed for ${document.id}`);
-                return generateFlashcardsAndQuestions(document.id, user.id);
+                return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
               })
               .then(() => {
                 console.log(
