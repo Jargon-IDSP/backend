@@ -111,9 +111,10 @@ export const enrichFlashcard = (flashcard: any, language?: string) => {
 
 export const combineFlashcardsForPractice = (
   industryFlashcards: any[],
-  generalFlashcards: any[]
+  generalFlashcards: any[],
+  limit: number = 50
 ): any[] => {
-  return [...industryFlashcards, ...generalFlashcards].slice(0, 50);
+  return [...industryFlashcards, ...generalFlashcards].slice(0, limit);
 };
 
 export const calculateAvailableTerms = async (

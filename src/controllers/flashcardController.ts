@@ -283,6 +283,8 @@ export const getPracticeTermsByLevel = async (c: Context) => {
   try {
     const { levelId } = extractRouteParams(c);
     const { language, industryId } = extractQueryParams(c);
+    const limitParam = c.req.query("limit");
+    const limit = limitParam ? parseInt(limitParam) : 50;
 
     if (!levelId) {
       return errorResponse(c, "Level ID is required", 400);
@@ -291,7 +293,7 @@ export const getPracticeTermsByLevel = async (c: Context) => {
     // Check cache first
     const cacheKey = `practice:level:${levelId}:${language}:${
       industryId || "all"
-    }`;
+    }:limit${limit}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
       return c.json(cached);
@@ -344,7 +346,8 @@ export const getPracticeTermsByLevel = async (c: Context) => {
 
     const combinedFlashcards = combineFlashcardsForPractice(
       industryFlashcards,
-      generalFlashcards
+      generalFlashcards,
+      limit
     );
 
     if (combinedFlashcards.length === 0) {
