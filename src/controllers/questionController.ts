@@ -717,6 +717,8 @@ export const completeQuiz = async (c: Context) => {
       // Invalidate user-related caches after quiz completion
       await invalidateCachePattern(`questions:user:${userId}:*`);
       await invalidateCachePattern(`quizzes:user:${userId}:*`);
+      // Invalidate levels cache to update completion status and unlock next levels
+      await invalidateCachePattern(`levels:*:${userId}`);
 
       return c.json(successResponse({ quizAttempt, pointsEarned }));
     } else if (type === "custom") {
@@ -967,11 +969,22 @@ export const getDocumentsByCategory = async (c: Context) => {
       return c.json(cached);
     }
 
-    // Now we can simply query documents by categoryId - much cleaner!
+    // Query documents by categoryId - only include fully processed documents
     const documents = await prisma.document.findMany({
       where: {
         userId: user.id,
         categoryId: categoryId,
+        ocrProcessed: true,
+        flashcards: {
+          some: {},
+        },
+        customQuizzes: {
+          some: {
+            questions: {
+              some: {},
+            },
+          },
+        },
       },
       select: {
         id: true,
@@ -1326,6 +1339,7 @@ export const getAllCategories = async (c: Context) => {
     }
 
     // Get all categories with document counts for this user
+    // Only count documents that are fully processed (have OCR done and have flashcards/questions)
     const categories = await prisma.category.findMany({
       select: {
         id: true,
@@ -1335,6 +1349,17 @@ export const getAllCategories = async (c: Context) => {
             documents: {
               where: {
                 userId: user.id,
+                ocrProcessed: true,
+                flashcards: {
+                  some: {},
+                },
+                customQuizzes: {
+                  some: {
+                    questions: {
+                      some: {},
+                    },
+                  },
+                },
               },
             },
           },
@@ -1358,8 +1383,8 @@ export const getAllCategories = async (c: Context) => {
       }
     );
 
-    // Cache for 5 minutes
-    await setCache(cacheKey, response, 300);
+    // Cache for shorter time (30 seconds) to show updates faster when documents finish processing
+    await setCache(cacheKey, response, 30);
 
     return c.json(response);
   } catch (error) {

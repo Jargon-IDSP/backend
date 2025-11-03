@@ -108,8 +108,11 @@ async function translateDocument(
     await prisma.documentTranslation.create({ data: translationData });
     console.log("✅ Translation complete\n");
 
-    // Invalidate translation caches
-    await invalidateCachePattern(`document:translation:${documentId}:*`);
+    // Invalidate translation and status caches immediately for real-time updates
+    await Promise.all([
+      invalidateCachePattern(`document:translation:${documentId}:*`),
+      invalidateCachePattern(`document:status:${documentId}`),
+    ]);
 
     console.log(`${"=".repeat(60)}`);
     console.log(`✨ TRANSLATION COMPLETE FOR ${documentId}`);
@@ -238,6 +241,7 @@ async function generateFlashcardsAndQuestions(
       invalidateCachePattern(`document:status:${documentId}`),
       invalidateCachePattern(`documents:user:${userId}`),
       invalidateCachePattern(`documents:category:${categoryId}:*`),
+      invalidateCachePattern(`categories:all:${userId}`), // Invalidate categories to update document counts
     ]);
     console.log("✅ Cache invalidation complete");
 
@@ -330,14 +334,18 @@ export const saveDocument = async (c: Context) => {
 
           setImmediate(() => {
             translateDocument(document.id, user.id, extractedText)
-              .then(() => {
+              .then(async () => {
                 console.log(`✅ Translation completed for ${document.id}`);
+                // Invalidate status cache to show translation is complete
+                await invalidateCachePattern(`document:status:${document.id}`);
                 return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
               })
-              .then(() => {
+              .then(async () => {
                 console.log(
                   `✅ Flashcards and questions generated for ${document.id}`
                 );
+                // Final invalidation to show everything is complete
+                await invalidateCachePattern(`document:status:${document.id}`);
               })
               .catch((err: Error) => {
                 console.error(
@@ -600,9 +608,9 @@ export const getDocumentStatus = async (c: Context) => {
       },
     };
 
-    // Cache for 30 seconds (status changes during processing)
-    // Use shorter TTL while processing, longer when completed
-    const ttl = status === "completed" ? 300 : 30;
+    // Cache for shorter time during processing for faster updates
+    // Use very short TTL while processing (5s), longer when completed (5min)
+    const ttl = status === "completed" ? 300 : 5;
     await setCache(cacheKey, response, ttl);
 
     return c.json(response);

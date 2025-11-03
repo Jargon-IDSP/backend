@@ -411,11 +411,12 @@ export const getLevels = async (c: Context) => {
   try {
     const { levelId } = extractRouteParams(c);
     const { language, industryId } = extractQueryParams(c);
+    const userId = c.get("userId");
 
-    // Check cache first
+    // Check cache first (user-specific now)
     const cacheKey = `levels:${levelId || "all"}:${language || "en"}:${
       industryId || "all"
-    }`;
+    }:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
       return c.json(cached);
@@ -444,6 +445,22 @@ export const getLevels = async (c: Context) => {
       );
     }
 
+    // Get user's completed levels (at least 70% correct)
+    const completedLevels = await prisma.userQuizAttempt.findMany({
+      where: {
+        userId,
+        levelId: { in: levels.map(l => l.id) },
+        completed: true,
+        percentCorrect: { gte: 70 }, // Must get 70% or higher
+      },
+      select: {
+        levelId: true,
+      },
+      distinct: ['levelId'],
+    });
+
+    const completedLevelIds = new Set(completedLevels.map(l => l.levelId));
+
     const levelsWithCounts = await Promise.all(
       levels.map(async (level: LevelData) => {
         const terms = await calculateAvailableTerms(level.id, parsedIndustryId);
@@ -454,6 +471,7 @@ export const getLevels = async (c: Context) => {
           industry_terms: terms.industryCount,
           general_terms: terms.generalCount,
           total_general_terms: terms.totalGeneralCount,
+          completed: completedLevelIds.has(level.id),
         };
       })
     );
@@ -466,8 +484,8 @@ export const getLevels = async (c: Context) => {
       }
     );
 
-    // Cache for 1 hour (levels rarely change)
-    await setCache(cacheKey, response, 3600);
+    // Cache for 5 minutes (user progress can change)
+    await setCache(cacheKey, response, 300);
 
     return c.json(response);
   } catch (error: any) {
