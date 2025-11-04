@@ -240,7 +240,7 @@ async function generateFlashcardsAndQuestions(
       invalidateCachePattern(`quizzes:user:${userId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
       invalidateCachePattern(`documents:user:${userId}`),
-      invalidateCachePattern(`documents:category:${categoryId}:*`),
+      invalidateCachePattern(`documents:category:${userId}:${categoryId}`), // Fixed: include userId in pattern
       invalidateCachePattern(`categories:all:${userId}`), // Invalidate categories to update document counts
     ]);
     console.log("✅ Cache invalidation complete");
@@ -319,47 +319,49 @@ export const saveDocument = async (c: Context) => {
     // Invalidate user's document list cache
     await invalidateCachePattern(`documents:user:${user.id}`);
     if (categoryId) {
-      await invalidateCachePattern(`documents:category:${categoryId}:*`);
+      await invalidateCachePattern(`documents:category:${user.id}:${categoryId}`);
     }
 
     const ocrSupportedTypes = ["application/pdf", "image/jpeg", "image/png"];
     if (ocrSupportedTypes.includes(fileType)) {
-      console.log(`🚀 Starting OCR extraction for ${filename}`);
+      console.log(`🚀 Starting background OCR extraction for ${filename}`);
 
-      try {
-        const extractedText = await extractTextWithOCR(document.id, user.id);
+      // Run OCR and all processing fully asynchronously without blocking the response
+      setImmediate(() => {
+        extractTextWithOCR(document.id, user.id)
+          .then(async (extractedText) => {
+            if (!extractedText) {
+              console.log(`⚠️ No text extracted from ${document.id}`);
+              return;
+            }
 
-        if (extractedText) {
-          console.log(`✅ OCR completed for ${document.id}`);
+            console.log(`✅ OCR completed for ${document.id}`);
 
-          setImmediate(() => {
-            translateDocument(document.id, user.id, extractedText)
-              .then(async () => {
-                console.log(`✅ Translation completed for ${document.id}`);
-                // Invalidate status cache to show translation is complete
-                await invalidateCachePattern(`document:status:${document.id}`);
-                return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
-              })
-              .then(async () => {
-                console.log(
-                  `✅ Flashcards and questions generated for ${document.id}`
-                );
-                // Final invalidation to show everything is complete
-                await invalidateCachePattern(`document:status:${document.id}`);
-              })
-              .catch((err: Error) => {
-                console.error(
-                  `❌ Background processing error for ${document.id}:`,
-                  err
-                );
-              });
+            // Invalidate status cache after OCR completes
+            await invalidateCachePattern(`document:status:${document.id}`);
+
+            return translateDocument(document.id, user.id, extractedText);
+          })
+          .then(async () => {
+            console.log(`✅ Translation completed for ${document.id}`);
+            // Invalidate status cache to show translation is complete
+            await invalidateCachePattern(`document:status:${document.id}`);
+            return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
+          })
+          .then(async () => {
+            console.log(
+              `✅ Flashcards and questions generated for ${document.id}`
+            );
+            // Final invalidation to show everything is complete
+            await invalidateCachePattern(`document:status:${document.id}`);
+          })
+          .catch((err: Error) => {
+            console.error(
+              `❌ Background processing error for ${document.id}:`,
+              err
+            );
           });
-        } else {
-          console.log(`⚠️ No text extracted from ${document.id}`);
-        }
-      } catch (error) {
-        console.error(`❌ OCR extraction error for ${document.id}:`, error);
-      }
+      });
     }
 
     return c.json({
@@ -380,7 +382,6 @@ export const getUserDocuments = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Check cache first
     const cacheKey = `documents:user:${user.id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -390,11 +391,22 @@ export const getUserDocuments = async (c: Context) => {
     const documents = await prisma.document.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
+      include: {
+        _count: {
+          select: {
+            flashcards: true,
+            customQuizzes: true,
+          },
+        },
+      },
     });
 
-    const response = { documents };
+    const fullyProcessedDocuments = documents
+      .filter(doc => doc._count.flashcards > 0 && doc._count.customQuizzes > 0)
+      .map(({ _count, ...doc }) => doc);
 
-    // Cache for 2 minutes (document list changes frequently)
+    const response = { documents: fullyProcessedDocuments };
+
     await setCache(cacheKey, response, 120);
 
     return c.json(response);
@@ -413,11 +425,9 @@ export const getDocument = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Check cache first
     const cacheKey = `document:${id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      // Verify ownership from cache
       if (cached.document.userId !== user.id) {
         return c.json({ error: "Forbidden" }, 403);
       }
@@ -438,7 +448,6 @@ export const getDocument = async (c: Context) => {
 
     const response = { document };
 
-    // Cache for 5 minutes
     await setCache(cacheKey, response, 300);
 
     return c.json(response);
@@ -515,7 +524,6 @@ export const deleteDocument = async (c: Context) => {
       where: { id },
     });
 
-    // Invalidate all related caches after deletion
     console.log("🔄 Invalidating caches after document deletion...");
     await Promise.all([
       invalidateCachePattern(`documents:user:${user.id}`),
@@ -542,11 +550,9 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Check cache first
     const cacheKey = `document:status:${id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      // Verify ownership from cache
       if (cached.document.userId !== user.id) {
         return c.json({ error: "Forbidden" }, 403);
       }
@@ -598,18 +604,16 @@ export const getDocumentStatus = async (c: Context) => {
         hasQuiz,
         flashcardCount,
         questionCount,
-        category: quiz?.category || null,
+        categoryId: quiz?.categoryId || null,
       },
       translation: document.translation,
       document: {
         id: document.id,
         filename: document.filename,
-        userId: document.userId, // Store userId for cache validation
+        userId: document.userId, 
       },
     };
 
-    // Cache for shorter time during processing for faster updates
-    // Use very short TTL while processing (5s), longer when completed (5min)
     const ttl = status === "completed" ? 300 : 5;
     await setCache(cacheKey, response, ttl);
 
@@ -629,11 +633,9 @@ export const getDocumentTranslation = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Check cache first
     const cacheKey = `document:translation:${id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      // Verify ownership
       if (cached.translation?.document?.userId !== user.id) {
         return c.json({ error: "Forbidden" }, 403);
       }
@@ -681,7 +683,6 @@ export const getDocumentTranslation = async (c: Context) => {
 
     const response = { translation };
 
-    // Cache for 10 minutes (translations don't change)
     await setCache(cacheKey, response, 600);
 
     return c.json(response);
@@ -721,7 +722,6 @@ export const triggerOCR = async (c: Context) => {
       return c.json({ error: "OCR failed" }, 500);
     }
 
-    // Invalidate document caches after OCR
     await Promise.all([
       invalidateCachePattern(`document:${id}`),
       invalidateCachePattern(`document:status:${id}`),
