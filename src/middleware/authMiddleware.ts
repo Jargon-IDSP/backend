@@ -40,7 +40,7 @@ async function syncUserToDatabase(clerkUser: any) {
           updatedAt: new Date(),
         },
       });
-      console.log(`Updated user: ${primaryEmail} (${clerkUser.id})`);
+      // console.log(`Updated user: ${primaryEmail} (${clerkUser.id})`);
     } else {
       await prisma.user.create({
         data: {
@@ -54,7 +54,7 @@ async function syncUserToDatabase(clerkUser: any) {
           updatedAt: new Date(clerkUser.updatedAt),
         },
       });
-      console.log(`Created user: ${primaryEmail} (${clerkUser.id})`);
+      // console.log(`Created user: ${primaryEmail} (${clerkUser.id})`);
     }
   } catch (error) {
     console.error(`Error syncing user ${clerkUser.id}:`, error);
@@ -67,10 +67,10 @@ export const authMiddleware = async (c: Context, next: Next) => {
     return next();
   }
 
-  console.log("🔒 AUTH MIDDLEWARE CALLED");
-  console.log("Path:", c.req.path);
-  console.log("Method:", c.req.method);
-  console.log("Headers:", c.req.header("Authorization") ? "Present" : "Missing");
+  // console.log("🔒 AUTH MIDDLEWARE CALLED");
+  // console.log("Path:", c.req.path);
+  // console.log("Method:", c.req.method);
+  // console.log("Headers:", c.req.header("Authorization") ? "Present" : "Missing");
   try {
     if (!process.env.CLERK_SECRET_KEY) {
       console.error("CLERK_SECRET_KEY not configured");
@@ -87,7 +87,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
       return c.json({ error: "No token provided" }, 401);
     }
 
-    console.log("Verifying token...");
+    // console.log("Verifying token...");
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY!,
     });
@@ -96,16 +96,16 @@ export const authMiddleware = async (c: Context, next: Next) => {
       return c.json({ error: "Invalid token" }, 401);
     }
 
-    console.log("Token verified for user:", payload.sub);
+    // console.log("Token verified for user:", payload.sub);
 
     const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
     const clerkUser = await clerk.users.getUser(payload.sub);
-    
-    console.log("User data:", {
-      id: clerkUser.id,
-      email: clerkUser.primaryEmailAddress?.emailAddress,
-      name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
-    });
+
+    // console.log("User data:", {
+    //   id: clerkUser.id,
+    //   email: clerkUser.primaryEmailAddress?.emailAddress,
+    //   name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
+    // });
 
     await syncUserToDatabase(clerkUser);
 

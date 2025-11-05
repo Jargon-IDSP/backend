@@ -197,13 +197,14 @@ export const getCustomQuestionsByDocument = async (c: Context) => {
       return errorResponse(c, "Document ID is required", 400);
     }
 
-    // Check cache first
+    // Check regular cache first
     const cacheKey = `questions:document:${documentId}:${language}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
       return c.json(cached);
     }
 
+    // Fetch from database
     const questions = await prisma.customQuestion.findMany({
       where: {
         correctAnswer: {
@@ -219,7 +220,35 @@ export const getCustomQuestionsByDocument = async (c: Context) => {
       },
     });
 
+    // If no questions in DB yet, check quick cache (English + user's preferred language, available within ~15s)
     if (questions.length === 0) {
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
+      if (quickCached) {
+        console.log(`⚡ Serving quick questions from cache for ${documentId}`);
+        const quickData = JSON.parse(quickCached);
+
+        // Map the cached questions to display format
+        const displayQuestions = quickData.questions.map((questionOut: any) => {
+          const lang = language?.toLowerCase() || 'english';
+          return {
+            id: questionOut.id,
+            prompt: questionOut.prompt[lang] || questionOut.prompt.english,
+            correctTermId: questionOut.correctTermId,
+            category: questionOut.category,
+            documentId: questionOut.documentId,
+            userId: questionOut.userId,
+            allLanguages: questionOut.prompt,
+          };
+        });
+
+        return c.json(successResponse(displayQuestions, {
+          count: displayQuestions.length,
+          document_id: documentId,
+          quickTranslation: true, // Flag to indicate this is partial data
+        }));
+      }
+
       return errorResponse(c, "No questions found for this document", 404);
     }
 
@@ -1059,6 +1088,123 @@ export const getCustomQuizById = async (c: Context) => {
       return errorResponse(c, "Quiz ID is required", 400);
     }
 
+    // Handle synthetic quiz IDs from quick cache
+    if (quizId.startsWith('quick-')) {
+      const documentId = quizId.replace('quick-', '');
+      console.log(`🔄 Redirecting synthetic quiz ID ${quizId} to document quiz for ${documentId}`);
+
+      // Check quick cache first
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
+
+      if (!quickCached) {
+        return errorResponse(c, "Quiz not found - quick cache expired", 404);
+      }
+
+      const quickData = JSON.parse(quickCached);
+
+      // Check if there's a quiz in DB now (quick cache might be old)
+      const hasQuizInDb = await prisma.customQuiz.count({
+        where: {
+          documentId: documentId,
+          userId: user.id,
+        },
+      });
+
+      if (hasQuizInDb > 0) {
+        // Redirect to the actual DB quiz
+        const dbQuiz = await prisma.customQuiz.findFirst({
+          where: {
+            documentId: documentId,
+            userId: user.id,
+          },
+        });
+        console.log(`✅ DB quiz now exists for document ${documentId}, using quiz ID ${dbQuiz?.id}`);
+        // Continue with normal flow using the real quiz ID
+        return c.redirect(`/learning/custom/quiz/${dbQuiz?.id}?language=${language}`);
+      }
+
+      // Serve from quick cache
+      console.log(`⚡ Serving quiz from quick cache for document ${documentId}`);
+      console.log(`📊 Quick cache has ${quickData.terms?.length || 0} terms and ${quickData.questions?.length || 0} questions`);
+
+      if (!quickData.questions || quickData.questions.length === 0) {
+        return errorResponse(c, "No questions available in quick cache", 404);
+      }
+
+      // Build enriched questions from quick cache (same as getCustomQuizByDocument)
+      const enrichedQuestions = quickData.questions.map((questionOut: any, index: number) => {
+        const correctTermIndex = parseInt(questionOut.correctTermId) - 1;
+        const correctTerm = quickData.terms[correctTermIndex];
+
+        if (!correctTerm) {
+          console.error(`⚠️ Missing correct term at index ${correctTermIndex} for question ${index}`);
+          throw new Error(`Invalid question reference: term index ${correctTermIndex} not found`);
+        }
+
+        // Build the correct answer flashcard
+        const correctAnswer: any = {
+          id: correctTerm.id,
+          term: correctTerm.term.term.english || '',
+          definition: correctTerm.term.definition.english || '',
+          documentId: correctTerm.term.documentId,
+          userId: correctTerm.term.userId,
+          category: correctTerm.term.category,
+        };
+
+        // Add native language if not English
+        if (lang !== 'english' && correctTerm.term.term[lang]) {
+          correctAnswer.nativeTerm = correctTerm.term.term[lang];
+          correctAnswer.nativeDefinition = correctTerm.term.definition[lang] || '';
+          correctAnswer.language = lang;
+        }
+
+        // Generate wrong choices from other terms
+        const wrongChoices = quickData.terms
+          .filter((_: any, i: number) => i !== correctTermIndex)
+          .slice(0, 3)
+          .map((term: any) => {
+            const choice: any = {
+              id: term.id,
+              term: term.term.term.english || '',
+              definition: term.term.definition.english || '',
+            };
+
+            if (lang !== 'english' && term.term.term[lang]) {
+              choice.nativeTerm = term.term.term[lang];
+              choice.nativeDefinition = term.term.definition[lang] || '';
+              choice.language = lang;
+            }
+
+            return choice;
+          });
+
+        // Combine and shuffle choices
+        const allChoices = [correctAnswer, ...wrongChoices].sort(() => Math.random() - 0.5);
+
+        return {
+          id: questionOut.id,
+          prompt: questionOut.prompt[lang] || questionOut.prompt.english,
+          correctAnswer,
+          choices: allChoices,
+          pointsWorth: 10,
+          category: questionOut.category,
+          documentId: questionOut.documentId,
+          userId: questionOut.userId,
+        };
+      });
+
+      return c.json(successResponse(enrichedQuestions, {
+        quiz_id: quizId,
+        quiz_name: 'Quick Quiz',
+        category: quickData.categoryId,
+        document_id: documentId,
+        question_count: enrichedQuestions.length,
+        selectedLanguage: lang,
+        quickTranslation: true,
+      }));
+    }
+
     // Check cache first
     const cacheKey = `quiz:custom:${quizId}:${lang}`;
     const cached = await getFromCache<any>(cacheKey);
@@ -1135,7 +1281,106 @@ export const getCustomQuizByDocument = async (c: Context) => {
       return c.json(cached);
     }
 
-    // Get the first quiz for this document
+    // Check quick cache if no quiz in DB yet (English + user's preferred language, available within ~15s)
+    const quickCacheKey = `flashcards:quick:${documentId}`;
+    const quickCached = await redisClient.get(quickCacheKey);
+
+    console.log(`🔍 Checking quick cache for document ${documentId}: ${quickCached ? 'FOUND' : 'NOT FOUND'}`);
+
+    if (quickCached) {
+      console.log(`⚡ Checking if we should serve quiz from quick cache for ${documentId}`);
+      const quickData = JSON.parse(quickCached);
+
+      // Only serve from quick cache if there's no quiz in DB yet
+      const hasQuizInDb = await prisma.customQuiz.count({
+        where: {
+          documentId: documentId,
+          userId: user.id,
+        },
+      });
+
+      if (hasQuizInDb === 0 && quickData.questions && quickData.questions.length > 0) {
+        console.log(`⚡ Serving quiz from quick cache for ${documentId}`);
+        console.log(`📊 Quick cache has ${quickData.terms?.length || 0} terms and ${quickData.questions?.length || 0} questions`);
+
+        // Build enriched questions from quick cache
+        const enrichedQuestions = quickData.questions.map((questionOut: any, index: number) => {
+          const correctTermIndex = parseInt(questionOut.correctTermId) - 1;
+          const correctTerm = quickData.terms[correctTermIndex];
+
+          if (!correctTerm) {
+            console.error(`⚠️ Missing correct term at index ${correctTermIndex} for question ${index}`);
+            console.error(`Question correctTermId: ${questionOut.correctTermId}, Total terms: ${quickData.terms.length}`);
+            console.error(`All question IDs:`, quickData.questions.map((q: any) => q.correctTermId));
+            console.error(`All term indices:`, quickData.terms.map((_: any, i: number) => i + 1));
+            throw new Error(`Invalid question reference: term index ${correctTermIndex} not found`);
+          }
+
+          // Build the correct answer flashcard
+          const correctAnswer: any = {
+            id: correctTerm.id,
+            term: correctTerm.term.term.english || '',
+            definition: correctTerm.term.definition.english || '',
+            documentId: correctTerm.term.documentId,
+            userId: correctTerm.term.userId,
+            category: correctTerm.term.category,
+          };
+
+          // Add native language if not English
+          if (lang !== 'english' && correctTerm.term.term[lang]) {
+            correctAnswer.nativeTerm = correctTerm.term.term[lang];
+            correctAnswer.nativeDefinition = correctTerm.term.definition[lang] || '';
+            correctAnswer.language = lang;
+          }
+
+          // Generate wrong choices from other terms
+          const wrongChoices = quickData.terms
+            .filter((_: any, i: number) => i !== correctTermIndex)
+            .slice(0, 3)
+            .map((term: any) => {
+              const choice: any = {
+                id: term.id,
+                term: term.term.term.english || '',
+                definition: term.term.definition.english || '',
+              };
+
+              if (lang !== 'english' && term.term.term[lang]) {
+                choice.nativeTerm = term.term.term[lang];
+                choice.nativeDefinition = term.term.definition[lang] || '';
+                choice.language = lang;
+              }
+
+              return choice;
+            });
+
+          // Combine and shuffle choices
+          const allChoices = [correctAnswer, ...wrongChoices].sort(() => Math.random() - 0.5);
+
+          return {
+            id: questionOut.id,
+            prompt: questionOut.prompt[lang] || questionOut.prompt.english,
+            correctAnswer,
+            choices: allChoices,
+            pointsWorth: 10,
+            category: questionOut.category,
+            documentId: questionOut.documentId,
+            userId: questionOut.userId,
+          };
+        });
+
+        return c.json(successResponse(enrichedQuestions, {
+          quiz_id: 'quick-' + documentId,
+          quiz_name: 'Quick Quiz',
+          category: quickData.categoryId,
+          document_id: documentId,
+          question_count: enrichedQuestions.length,
+          selectedLanguage: lang,
+          quickTranslation: true,
+        }));
+      }
+    }
+
+    // Get the first quiz for this document from DB
     const quiz = await prisma.customQuiz.findFirst({
       where: {
         documentId: documentId,
@@ -1207,7 +1452,7 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
 
     const document = await prisma.document.findUnique({
       where: { id: documentId },
-      select: { userId: true },
+      select: { userId: true, filename: true },
     });
 
     if (!document) {
@@ -1254,6 +1499,47 @@ export const getCustomQuizzesByDocument = async (c: Context) => {
         createdAt: "desc",
       },
     });
+
+    // If no quizzes in DB but quick cache exists, return a synthetic quiz entry
+    if (quizzes.length === 0 && isOwner) {
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
+
+      if (quickCached) {
+        const quickData = JSON.parse(quickCached);
+        console.log(`⚡ Found quick cache for document ${documentId}, returning synthetic quiz entry`);
+
+        // Create a synthetic quiz entry that the frontend can use
+        const syntheticQuiz = {
+          id: `quick-${documentId}`,
+          name: 'Quick Quiz',
+          documentId,
+          userId,
+          categoryId: quickData.categoryId,
+          pointsPerQuestion: 10,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          document: {
+            id: documentId,
+            filename: document.filename || 'Document',
+          },
+          _count: {
+            questions: quickData.questions?.length || 0,
+          },
+        };
+
+        const response = successResponse([syntheticQuiz], {
+          count: 1,
+          document_id: documentId,
+          user_id: userId,
+          is_owner: isOwner,
+          quickCache: true,
+        });
+
+        // Don't cache this since it's temporary
+        return c.json(response);
+      }
+    }
 
     const response = successResponse(quizzes, {
       count: quizzes.length,

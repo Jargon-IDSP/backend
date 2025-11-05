@@ -122,12 +122,15 @@ export async function extractTermsAndQuestions(
   existingDbTermsEnglish: string[]
 ): Promise<ExtractionResponse> {
   const extractionPrompt = `
-From the OCR text, you MUST select EXACTLY 10 DISTINCT, meaningful terms (no duplicates vs this list: ${existingDbTermsEnglish.slice(0, 200).join(", ")}).
+From the OCR text, you MUST select EXACTLY 15 DISTINCT, meaningful terms.
 
-IMPORTANT: You must return exactly 10 terms and 10 questions. 
+CRITICAL: Avoid these terms that the user already knows: ${existingDbTermsEnglish.slice(0, 200).join(", ")}
+
+IMPORTANT: You must return exactly 15 terms and 15 questions.
 - First, extract terms that appear directly in the document
-- If fewer than 10 terms are found, generate additional relevant terms related to the document's topic to reach exactly 10 terms
+- If fewer than 15 terms are found, generate additional relevant terms related to the document's topic to reach exactly 15 terms
 - For example, if a document mentions "PPE" and "hard hat", you could add related terms like "safety goggles", "steel-toed boots", "high-visibility vest", etc.
+- DO NOT include any terms from the "user already knows" list above
 
 For each term provide:
 1. A concise English definition (10–25 words)
@@ -139,7 +142,7 @@ For each term provide:
    - Professional: Career development, industry standards, professional conduct, ethics
    - General: Basic concepts that don't fit other categories
 
-Also produce EXACTLY 10 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
+Also produce EXACTLY 15 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
 
 Return STRICT JSON ONLY:
 {
@@ -166,6 +169,58 @@ OCR:
   return parseJSONResponse<ExtractionResponse>(extractionText);
 }
 
+// Quick translation: English + user's preferred language only (FAST!)
+export async function translateUserPreferredLanguageOnly(
+  ai: GoogleGenAI,
+  terms: { english: string; definitionEnglish: string }[],
+  questions: { promptEnglish: string; correctEnglish: string }[],
+  targetLanguage: string
+): Promise<TranslationResponse> {
+  // If English, no translation needed - just return empty translations
+  if (targetLanguage.toLowerCase() === 'english') {
+    return {
+      terms: terms.map(t => ({
+        english: t.english,
+        term: { french: '', chinese: '', spanish: '', tagalog: '', punjabi: '', korean: '' },
+        definition: { french: '', chinese: '', spanish: '', tagalog: '', punjabi: '', korean: '' }
+      })),
+      questions: questions.map(() => ({
+        prompt: { french: '', chinese: '', spanish: '', tagalog: '', punjabi: '', korean: '' }
+      }))
+    };
+  }
+
+  const translatePrompt = `
+Translate the following English terms+definitions+prompts into ${targetLanguage} ONLY.
+Return STRICT JSON ONLY with this structure (only populate the ${targetLanguage} field):
+{
+  "terms": [{
+    "english": "Adhesive",
+    "term": { "${targetLanguage}":"..." },
+    "definition": { "${targetLanguage}":"..." }
+  }],
+  "questions": [{
+    "prompt": { "${targetLanguage}":"..." }
+  }]
+}
+
+SOURCE:
+{
+  "terms": ${JSON.stringify(terms, null, 2)},
+  "questions": ${JSON.stringify(questions, null, 2)}
+}
+`.trim();
+
+  const translateResp = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts: [{ text: translatePrompt }] }],
+  });
+
+  const translateText = extractResponseText(translateResp);
+  return parseJSONResponse<TranslationResponse>(translateText);
+}
+
+// Full translation: All 6 languages (SLOW!) - saves to DB
 export async function translateTermsAndQuestions(
   ai: GoogleGenAI,
   terms: { english: string; definitionEnglish: string }[],
@@ -296,8 +351,17 @@ export function buildQuestionsOutput(
   questions: { promptEnglish: string; correctEnglish: string; category: QuizCategory }[],
   translated: TranslationResponse,
   documentId: string,
-  userId: string
+  userId: string,
+  terms?: { english: string; definitionEnglish: string; category: QuizCategory }[]
 ): QuestionOut[] {
+  // Create a map of term -> index for quick lookup
+  const termIndexMap = new Map<string, number>();
+  if (terms) {
+    terms.forEach((term, index) => {
+      termIndexMap.set(term.english.toLowerCase(), index + 1);
+    });
+  }
+
   return questions.map((q, i) => {
     const id = formatCustomId("cq", i + 1);
     const trQ = translated.questions?.[i];
@@ -312,7 +376,10 @@ export function buildQuestionsOutput(
       korean: trQ?.prompt?.korean ?? q.promptEnglish,
     };
 
-    return { id, correctTermId: String(i + 1), prompt, documentId, userId, category: q.category };
+    // Find the correct term index in the final terms array
+    const correctTermId = termIndexMap.get(q.correctEnglish.toLowerCase()) || String(i + 1);
+
+    return { id, correctTermId: String(correctTermId), prompt, documentId, userId, category: q.category };
   });
 }
 

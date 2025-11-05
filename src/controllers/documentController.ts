@@ -9,15 +9,12 @@ import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 import redisClient from "../lib/redis";
 
-// Helper function to get from cache
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
     const cached = await redisClient.get(key);
     if (cached) {
-      console.log(`✅ Cache HIT: ${key}`);
       return JSON.parse(cached) as T;
     }
-    console.log(`❌ Cache MISS: ${key}`);
     return null;
   } catch (error) {
     console.error(`Error getting cache for ${key}:`, error);
@@ -25,7 +22,6 @@ const getFromCache = async <T>(key: string): Promise<T | null> => {
   }
 };
 
-// Helper function to set cache
 const setCache = async <T>(
   key: string,
   data: T,
@@ -33,21 +29,16 @@ const setCache = async <T>(
 ): Promise<void> => {
   try {
     await redisClient.setEx(key, ttl, JSON.stringify(data));
-    console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
   } catch (error) {
     console.error(`Error setting cache for ${key}:`, error);
   }
 };
 
-// Helper function to invalidate cache by pattern
 const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
       await redisClient.del(keys);
-      console.log(
-        `🗑️  Invalidated ${keys.length} cache keys matching: ${pattern}`
-      );
     }
   } catch (error) {
     console.error(`Error invalidating cache pattern ${pattern}:`, error);
@@ -95,20 +86,47 @@ async function translateDocument(
     console.log(`🌐 TRANSLATING DOCUMENT: ${documentId}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    const { translateFullDocument } = await import(
+    const { translateFullDocument, translateUserPreferredLanguage } = await import(
       "./helperFunctions/documentHelper"
     );
 
-    console.log("🌐 Translating to all languages...");
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { language: true },
+    });
+    const userLanguage = user?.language || 'english';
+
+    console.log(`🎯 User's preferred language: ${userLanguage}`);
+    console.log(`⚡ Translating ${userLanguage} first for fast display...`);
+
+    const quickTranslation = await translateUserPreferredLanguage(
+      extractedText,
+      userLanguage
+    );
+
+    await redisClient.setEx(
+      `translation:quick:${documentId}`,
+      300, 
+      JSON.stringify({
+        language: userLanguage,
+        text: quickTranslation,
+        textEnglish: extractedText,
+      })
+    );
+    console.log(`✅ Quick translation cached for instant display!`);
+
+    console.log("🌐 Continuing with full translation to all languages...");
     const translationData = await translateFullDocument(
       extractedText,
       documentId,
       userId
     );
+    console.log("✅ Translation data received, saving to database...");
     await prisma.documentTranslation.create({ data: translationData });
-    console.log("✅ Translation complete\n");
+    console.log("✅ Translation complete and saved to database\n");
 
-    // Invalidate translation and status caches immediately for real-time updates
+    await redisClient.del(`translation:quick:${documentId}`);
+
     await Promise.all([
       invalidateCachePattern(`document:translation:${documentId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
@@ -127,14 +145,156 @@ async function translateDocument(
   }
 }
 
-async function generateFlashcardsAndQuestions(
+async function generateFlashcardsAndQuestionsOptimized(
   documentId: string,
   userId: string,
   providedCategoryId?: number | null
 ) {
   try {
     console.log(`\n${"=".repeat(60)}`);
-    console.log(`🎴 ASYNC FLASHCARD GENERATION: ${documentId}`);
+    console.log(`🎴 OPTIMIZED FLASHCARD GENERATION: ${documentId}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    const existingFlashcards = await prisma.customFlashcard.count({
+      where: { documentId },
+    });
+
+    if (existingFlashcards > 0) {
+      console.log(`⚠️ Flashcards already exist for document ${documentId}, skipping generation`);
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { language: true },
+    });
+    const userLanguage = user?.language || 'english';
+
+    console.log(`🎯 User's preferred language: ${userLanguage}`);
+    console.log(`⚡ Generating flashcards in ${userLanguage} first...`);
+
+    await generateFlashcardsQuick(documentId, userId, userLanguage, providedCategoryId);
+
+    console.log(`✅ Quick flashcards cached!`);
+    console.log(`🌐 Continuing with full multilingual flashcards...`);
+
+    await generateFlashcardsFull(documentId, userId, providedCategoryId);
+
+    console.log(`✅ Full flashcards saved to database`);
+
+  } catch (error) {
+    console.error(`❌ Optimized flashcard generation failed for ${documentId}:`, error);
+    throw error;
+  }
+}
+
+async function generateFlashcardsQuick(
+  documentId: string,
+  userId: string,
+  userLanguage: string,
+  providedCategoryId?: number | null
+) {
+  const document = await prisma.document.findUnique({
+    where: { id: documentId },
+    select: {
+      id: true,
+      extractedText: true,
+      filename: true,
+      categoryId: true,
+    },
+  });
+
+  if (!document || !document.extractedText) {
+    throw new Error("No document or extracted text");
+  }
+
+  const { getExistingTerms } = await import("./helperFunctions/documentHelper");
+  const {
+    extractTermsAndQuestions,
+    translateUserPreferredLanguageOnly,
+    cleanAndDeduplicateTerms,
+    filterAndFillQuestions,
+    makeDedupSet,
+    buildTermsOutput,
+    buildQuestionsOutput
+  } = await import("./helperFunctions/customFlashcardHelper");
+  const { GoogleGenAI } = await import("@google/genai");
+
+  if (!process.env.GOOGLE_GENAI_API_KEY) {
+    throw new Error("Missing GOOGLE_GENAI_API_KEY");
+  }
+
+  const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+
+  const allExistingTerms = await getExistingTerms(userId);
+  const termsFromThisDocument = await prisma.customFlashcard.findMany({
+    where: { documentId },
+    select: { termEnglish: true },
+  });
+  const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
+  const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
+
+  console.log("📝 Step 1: Extracting terms and questions in English...");
+
+  const extraction = await extractTermsAndQuestions(
+    ai,
+    document.extractedText,
+    existingDbTermsEnglish
+  );
+
+  const dedup = makeDedupSet(existingDbTermsEnglish);
+  const top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
+
+  if (top10.length === 0) {
+    throw new Error("No usable terms after deduplication.");
+  }
+
+  const qEnglish = filterAndFillQuestions(extraction.questions, top10);
+
+  console.log(`✅ Extracted ${top10.length} terms and ${qEnglish.length} questions in English`);
+  console.log(`🌐 Step 2: Translating to ${userLanguage}...`);
+
+  const translated = await translateUserPreferredLanguageOnly(ai, top10, qEnglish, userLanguage);
+
+  console.log(`✅ Translated to ${userLanguage}`);
+
+  const termsOut = buildTermsOutput(top10, translated, documentId, userId);
+  const questionsOut = buildQuestionsOutput(qEnglish, translated, documentId, userId, top10);
+
+  let categoryId: number;
+  if (providedCategoryId) {
+    categoryId = providedCategoryId;
+  } else if (document.categoryId) {
+    categoryId = document.categoryId;
+  } else {
+    const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+    categoryId = await categorizeDocument(document.extractedText);
+  }
+
+  await redisClient.setEx(
+    `flashcards:quick:${documentId}`,
+    300,
+    JSON.stringify({
+      terms: termsOut,
+      questions: questionsOut,
+      categoryId,
+      language: userLanguage,
+      rawTerms: top10,
+      rawQuestions: qEnglish,
+    })
+  );
+
+  console.log(`⚡ Quick flashcards cached: ${termsOut.length} terms, ${questionsOut.length} questions (English + ${userLanguage})`);
+}
+
+async function generateFlashcardsFull(
+  documentId: string,
+  userId: string,
+  providedCategoryId?: number | null
+) {
+  try {
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`🎴 FULL FLASHCARD GENERATION: ${documentId}`);
     console.log(`${"=".repeat(60)}\n`);
 
     const {
@@ -145,9 +305,20 @@ async function generateFlashcardsAndQuestions(
       createIndexToIdMap,
     } = await import("./helperFunctions/documentHelper");
 
-    const { generateCustomFromOCR } = await import(
-      "./helperFunctions/customFlashcardHelper"
-    );
+    const {
+      extractTermsAndQuestions,
+      translateTermsAndQuestions,
+      cleanAndDeduplicateTerms,
+      filterAndFillQuestions,
+      makeDedupSet,
+      buildTermsOutput,
+      buildQuestionsOutput
+    } = await import("./helperFunctions/customFlashcardHelper");
+    const { GoogleGenAI } = await import("@google/genai");
+
+    if (!process.env.GOOGLE_GENAI_API_KEY) {
+      throw new Error("Missing GOOGLE_GENAI_API_KEY");
+    }
 
     const document = await prisma.document.findUnique({
       where: { id: documentId },
@@ -164,52 +335,79 @@ async function generateFlashcardsAndQuestions(
       return;
     }
 
-    const translation = await prisma.documentTranslation.findUnique({
-      where: { documentId },
-      select: { textEnglish: true },
-    });
+    const quickCacheKey = `flashcards:quick:${documentId}`;
+    const quickCached = await redisClient.get(quickCacheKey);
 
-    if (!translation) {
-      console.log("❌ No translation found, skipping flashcard generation");
-      return;
-    }
-
-    console.log(
-      "🎴 Generating flashcards and questions from extracted text..."
-    );
-    const existingDbTermsEnglish = await getExistingTerms(userId);
-
-    const generation = await generateCustomFromOCR({
-      ocrText: document.extractedText,
-      userId,
-      documentId,
-      existingDbTermsEnglish,
-    });
-
-    // Use provided categoryId if available, otherwise use AI categorization
+    let top10: any[];
+    let qEnglish: any[];
     let categoryId: number;
-    if (providedCategoryId) {
-      categoryId = providedCategoryId;
-      console.log(`📁 Using user-selected category ID: ${categoryId}`);
-    } else if (document.categoryId) {
-      categoryId = document.categoryId;
-      console.log(`📁 Using existing category ID: ${categoryId}`);
+
+    if (quickCached) {
+      console.log("⚡ Reusing extracted data from quick cache...");
+      const quickData = JSON.parse(quickCached);
+      top10 = quickData.rawTerms;
+      qEnglish = quickData.rawQuestions;
+      categoryId = quickData.categoryId;
     } else {
-      const { categorizeDocument } = await import("./helperFunctions/documentHelper");
-      categoryId = await categorizeDocument(document.extractedText);
-      console.log(`📁 AI categorized document as category ID: ${categoryId}`);
+      console.log("📝 Extracting terms and questions in English...");
+      const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+
+      const allExistingTerms = await getExistingTerms(userId);
+      const termsFromThisDocument = await prisma.customFlashcard.findMany({
+        where: { documentId },
+        select: { termEnglish: true },
+      });
+      const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
+      const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
+
+      const extraction = await extractTermsAndQuestions(
+        ai,
+        document.extractedText,
+        existingDbTermsEnglish
+      );
+
+      const dedup = makeDedupSet(existingDbTermsEnglish);
+      top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
+
+      if (top10.length === 0) {
+        throw new Error("No usable terms after deduplication.");
+      }
+
+      qEnglish = filterAndFillQuestions(extraction.questions, top10);
+
+      if (providedCategoryId) {
+        categoryId = providedCategoryId;
+        console.log(`📁 Using user-selected category ID: ${categoryId}`);
+      } else if (document.categoryId) {
+        categoryId = document.categoryId;
+        console.log(`📁 Using existing category ID: ${categoryId}`);
+      } else {
+        const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+        categoryId = await categorizeDocument(document.extractedText);
+        console.log(`📁 AI categorized document as category ID: ${categoryId}`);
+      }
     }
+
+    console.log(`🌐 Translating to ALL 6 languages (french, chinese, spanish, tagalog, punjabi, korean)...`);
+    const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+
+    const translated = await translateTermsAndQuestions(ai, top10, qEnglish);
+
+    console.log("✅ Translation complete for all languages");
+
+    const termsOut = buildTermsOutput(top10, translated, documentId, userId);
+    const questionsOut = buildQuestionsOutput(qEnglish, translated, documentId, userId, top10);
 
     const quizData = createQuizData(documentId, userId, document.filename, categoryId);
     const flashcardData = transformToFlashcardData(
-      generation.terms,
+      termsOut,
       documentId,
       userId,
       categoryId
     );
     const indexToIdMap = createIndexToIdMap(flashcardData);
     const questionData = transformToQuestionData(
-      generation.questions,
+      questionsOut,
       indexToIdMap,
       quizData.id,
       userId,
@@ -227,10 +425,11 @@ async function generateFlashcardsAndQuestions(
     ]);
 
     console.log(
-      `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`
+      `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database\n`
     );
 
-    // Invalidate all related caches after flashcard generation
+    await redisClient.del(quickCacheKey);
+
     console.log("🔄 Invalidating caches after flashcard generation...");
     await Promise.all([
       invalidateCachePattern(`custom:user:${userId}:*`),
@@ -240,8 +439,8 @@ async function generateFlashcardsAndQuestions(
       invalidateCachePattern(`quizzes:user:${userId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
       invalidateCachePattern(`documents:user:${userId}`),
-      invalidateCachePattern(`documents:category:${userId}:${categoryId}`), // Fixed: include userId in pattern
-      invalidateCachePattern(`categories:all:${userId}`), // Invalidate categories to update document counts
+      invalidateCachePattern(`documents:category:${userId}:${categoryId}`),
+      invalidateCachePattern(`categories:all:${userId}`),
     ]);
     console.log("✅ Cache invalidation complete");
 
@@ -312,11 +511,10 @@ export const saveDocument = async (c: Context) => {
         extractedText: extractedText || null,
         ocrProcessed: false,
         userId: user.id,
-        categoryId: categoryId || 6, // Default to General category (ID: 6)
+        categoryId: categoryId || 6, 
       },
     });
 
-    // Invalidate user's document list cache
     await invalidateCachePattern(`documents:user:${user.id}`);
     if (categoryId) {
       await invalidateCachePattern(`documents:category:${user.id}:${categoryId}`);
@@ -326,7 +524,6 @@ export const saveDocument = async (c: Context) => {
     if (ocrSupportedTypes.includes(fileType)) {
       console.log(`🚀 Starting background OCR extraction for ${filename}`);
 
-      // Run OCR and all processing fully asynchronously without blocking the response
       setImmediate(() => {
         extractTextWithOCR(document.id, user.id)
           .then(async (extractedText) => {
@@ -337,22 +534,17 @@ export const saveDocument = async (c: Context) => {
 
             console.log(`✅ OCR completed for ${document.id}`);
 
-            // Invalidate status cache after OCR completes
             await invalidateCachePattern(`document:status:${document.id}`);
 
-            return translateDocument(document.id, user.id, extractedText);
+            translateDocument(document.id, user.id, extractedText)
+              .catch((err: Error) => {
+                console.error(`❌ Translation error for ${document.id}:`, err);
+              });
+
+            return generateFlashcardsAndQuestionsOptimized(document.id, user.id, categoryId);
           })
           .then(async () => {
-            console.log(`✅ Translation completed for ${document.id}`);
-            // Invalidate status cache to show translation is complete
-            await invalidateCachePattern(`document:status:${document.id}`);
-            return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
-          })
-          .then(async () => {
-            console.log(
-              `✅ Flashcards and questions generated for ${document.id}`
-            );
-            // Final invalidation to show everything is complete
+            console.log(`✅ Flashcards and questions generated for ${document.id}`);
             await invalidateCachePattern(`document:status:${document.id}`);
           })
           .catch((err: Error) => {
@@ -371,6 +563,102 @@ export const saveDocument = async (c: Context) => {
     });
   } catch (error) {
     console.error("Save document error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
+
+export const finalizeDocument = async (c: Context) => {
+  try {
+    const id = c.req.param("id");
+    const { categoryId } = await c.req.json();
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`🎯 FINALIZE DOCUMENT CALLED: ${id}`);
+    console.log(`📁 Category ID: ${categoryId}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    const user = c.get("user");
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    if (!categoryId || typeof categoryId !== "number") {
+      return c.json({ error: "Valid categoryId is required" }, 400);
+    }
+
+    const document = await prisma.document.findUnique({
+      where: { id },
+      include: {
+        translation: true,
+        flashcards: true,
+      },
+    });
+
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    if (document.flashcards.length > 0) {
+      return c.json({
+        message: "Document already finalized",
+        status: "already_completed",
+        documentId: document.id,
+      });
+    }
+
+    let ocrReady = !!document.extractedText;
+    let attempts = 0;
+    const maxAttempts = 60; 
+
+    while (!ocrReady && attempts < maxAttempts) {
+      console.log(`⏳ Waiting for OCR... (attempt ${attempts + 1}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const updatedDoc = await prisma.document.findUnique({
+        where: { id },
+        select: { extractedText: true },
+      });
+
+      ocrReady = !!updatedDoc?.extractedText;
+      attempts++;
+
+      if (ocrReady) {
+        console.log(`✅ OCR ready after ${attempts * 2} seconds`);
+        break;
+      }
+    }
+
+    if (!ocrReady) {
+      return c.json({
+        error: "OCR timed out. Please try again later.",
+        status: "ocr_timeout",
+      }, 408);
+    }
+
+    console.log(`✅ OCR complete, proceeding with flashcard generation`);
+
+    await prisma.document.update({
+      where: { id },
+      data: { categoryId },
+    });
+
+    console.log(`🎯 Finalizing document ${id} with category ${categoryId}`);
+
+    await generateFlashcardsAndQuestionsOptimized(document.id, user.id, categoryId);
+
+    console.log(`✅ Document ${id} finalized successfully`);
+
+    return c.json({
+      message: "Document finalized successfully",
+      status: "completed",
+      documentId: document.id,
+    });
+  } catch (error) {
+    console.error("Finalize document error:", error);
     return c.json({ error: String(error) }, 500);
   }
 };
@@ -580,13 +868,35 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Forbidden" }, 403);
     }
 
-    const hasTranslation = !!document.translation;
+    const quickCacheKey = `flashcards:quick:${id}`;
+    const quickCached = await redisClient.get(quickCacheKey);
+    const hasQuickCache = !!quickCached;
+
+    const translationQuickCacheKey = `translation:quick:${id}`;
+    const translationQuickCached = await redisClient.get(translationQuickCacheKey);
+    const hasQuickTranslation = !!translationQuickCached;
+
+    let quickFlashcardCount = 0;
+    let quickQuestionCount = 0;
+    let quickCategoryId: number | null = null;
+
+    if (hasQuickCache) {
+      const quickData = JSON.parse(quickCached);
+      quickFlashcardCount = quickData.terms?.length || 0;
+      quickQuestionCount = quickData.questions?.length || 0;
+      quickCategoryId = quickData.categoryId || null;
+    }
+
+    const hasTranslation = !!document.translation || hasQuickTranslation;
     const flashcardCount = document.flashcards.length;
     const hasFlashcards = flashcardCount > 0;
 
     const quiz = document.customQuizzes[0];
     const questionCount = quiz?.questions.length || 0;
     const hasQuiz = !!quiz && questionCount > 0;
+
+    const hasFlashcardsOrQuickCache = hasFlashcards || (hasQuickCache && quickFlashcardCount > 0);
+    const hasQuizInDb = hasQuiz; 
 
     let status: "processing" | "completed" | "error" = "processing";
 
@@ -600,17 +910,18 @@ export const getDocumentStatus = async (c: Context) => {
       status: {
         status,
         hasTranslation,
-        hasFlashcards,
-        hasQuiz,
-        flashcardCount,
-        questionCount,
-        categoryId: quiz?.categoryId || null,
+        hasFlashcards: hasFlashcardsOrQuickCache,  
+        hasQuiz: hasQuizInDb, 
+        flashcardCount: hasFlashcards ? flashcardCount : quickFlashcardCount,
+        questionCount: hasQuiz ? questionCount : quickQuestionCount,
+        categoryId: quiz?.categoryId || quickCategoryId || null,
+        quickTranslation: hasQuickCache && !hasFlashcards, 
       },
       translation: document.translation,
       document: {
         id: document.id,
         filename: document.filename,
-        userId: document.userId, 
+        userId: document.userId,
       },
     };
 
@@ -633,6 +944,57 @@ export const getDocumentTranslation = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
+    // Check quick cache first (user's preferred language, ready in ~10s)
+    const quickCacheKey = `translation:quick:${id}`;
+    const quickCached = await redisClient.get(quickCacheKey);
+    if (quickCached) {
+      const quickData = JSON.parse(quickCached);
+      console.log(`⚡ Serving quick translation from cache for ${id}`);
+
+      // Fetch document to get filename
+      const document = await prisma.document.findUnique({
+        where: { id },
+        select: { id: true, userId: true, filename: true },
+      });
+
+      if (!document) {
+        return c.json({ error: "Document not found" }, 404);
+      }
+
+      if (document.userId !== user.id) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+
+      // Return in same format as DB translation
+      const translationData: any = {
+        id: 'quick-' + id,
+        documentId: id,
+        userId: user.id,
+        textEnglish: quickData.textEnglish,
+        textFrench: '',
+        textChinese: '',
+        textSpanish: '',
+        textTagalog: '',
+        textPunjabi: '',
+        textKorean: '',
+        document: {
+          id: document.id,
+          userId: document.userId,
+          filename: document.filename,
+        },
+      };
+
+      // Set the user's preferred language
+      const langKey = `text${quickData.language.charAt(0).toUpperCase() + quickData.language.slice(1)}`;
+      translationData[langKey] = quickData.text;
+
+      return c.json({
+        translation: translationData,
+        quickTranslation: true, // Flag to indicate this is partial
+      });
+    }
+
+    // Check regular cache
     const cacheKey = `document:translation:${id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -642,6 +1004,7 @@ export const getDocumentTranslation = async (c: Context) => {
       return c.json(cached);
     }
 
+    // Check database for full translation
     const translation = await prisma.documentTranslation.findUnique({
       where: { documentId: id },
       include: {

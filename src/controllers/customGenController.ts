@@ -4,7 +4,6 @@ import { prisma } from "../lib/prisma";
 import { generateCustomFromOCR } from "./helperFunctions/customFlashcardHelper";
 import redisClient from "../lib/redis";
 
-// Helper function to invalidate cache by pattern
 const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     const keys = await redisClient.keys(pattern);
@@ -29,7 +28,6 @@ export const generateCustomForDocument = async (c: Context) => {
 
     const body = await c.req.json().catch(() => ({}));
 
-    // Map category name to ID if provided, otherwise use document's category or default to General
     const categoryMap: Record<string, number> = {
       'SAFETY': 1, 'safety': 1,
       'TECHNICAL': 2, 'technical': 2,
@@ -49,7 +47,6 @@ export const generateCustomForDocument = async (c: Context) => {
       );
     }
 
-    // Use category from body if provided, otherwise use document's category
     const categoryId = body.category
       ? (categoryMap[body.category] || doc.categoryId || 6)
       : (doc.categoryId || 6);
@@ -139,22 +136,17 @@ export const generateCustomForDocument = async (c: Context) => {
       ...toSaveQs.map((data) => prisma.customQuestion.create({ data })),
     ]);
 
-    // ✅ INVALIDATE CACHES after successful generation
-    // This ensures users see their newly generated flashcards and questions
+
     console.log("🔄 Invalidating caches after custom generation...");
     await Promise.all([
-      // Invalidate custom flashcard caches for this user
       invalidateCachePattern(`custom:user:${user.id}:*`),
       invalidateCachePattern(`custom:category:${user.id}:*`),
 
-      // Invalidate custom flashcard caches for this document
       invalidateCachePattern(`custom:document:${doc.id}:*`),
 
-      // Invalidate custom question caches for this user
       invalidateCachePattern(`questions:user:${user.id}:*`),
       invalidateCachePattern(`questions:document:${doc.id}:*`),
 
-      // Invalidate custom quiz caches
       invalidateCachePattern(`quizzes:user:${user.id}:*`),
     ]);
     console.log("✅ Cache invalidation complete");
@@ -163,7 +155,7 @@ export const generateCustomForDocument = async (c: Context) => {
       ok: true,
       quizId: quizData.id,
       quizName: doc.filename,
-      category: category,
+      category: categoryId,
       savedFlashcards: toSaveCards.length,
       savedQuestions: toSaveQs.length,
     });

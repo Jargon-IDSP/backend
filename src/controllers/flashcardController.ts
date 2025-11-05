@@ -503,13 +503,14 @@ export const getCustomFlashcardsByDocument = async (c: Context) => {
       return errorResponse(c, "Document ID is required", 400);
     }
 
-    // Check cache first
+    // Check regular cache first
     const cacheKey = `custom:document:${documentId}:${language}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
       return c.json(cached);
     }
 
+    // Fetch from database
     const flashcards = await prisma.customFlashcard.findMany({
       where: { documentId },
       include: {
@@ -517,7 +518,45 @@ export const getCustomFlashcardsByDocument = async (c: Context) => {
       },
     });
 
+    // If no flashcards in DB yet, check quick cache (English + user's preferred language, available within ~15s)
     if (flashcards.length === 0) {
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
+      if (quickCached) {
+        console.log(`⚡ Serving quick flashcards from cache for ${documentId}`);
+        const quickData = JSON.parse(quickCached);
+
+        // Map the cached terms to display format
+        const displayFlashcards = quickData.terms.map((termOut: any) => {
+          const lang = language?.toLowerCase() || 'english';
+
+          // Always show English term/definition
+          const result: any = {
+            id: termOut.id,
+            term: termOut.term.term.english || '',
+            definition: termOut.term.definition.english || '',
+            documentId: termOut.term.documentId,
+            userId: termOut.term.userId,
+            category: termOut.term.category,
+          };
+
+          // Add native language if not English
+          if (lang !== 'english' && termOut.term.term[lang]) {
+            result.nativeTerm = termOut.term.term[lang];
+            result.nativeDefinition = termOut.term.definition[lang] || '';
+            result.language = lang;
+          }
+
+          return result;
+        });
+
+        return c.json(successResponse(displayFlashcards, {
+          count: displayFlashcards.length,
+          document_id: documentId,
+          quickTranslation: true, // Flag to indicate this is partial data
+        }));
+      }
+
       return errorResponse(c, "No flashcards found for this document", 404);
     }
 
