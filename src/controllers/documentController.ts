@@ -14,10 +14,10 @@ const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
     const cached = await redisClient.get(key);
     if (cached) {
-      console.log(`✅ Cache HIT: ${key}`);
+      // console.log(`✅ Cache HIT: ${key}`);
       return JSON.parse(cached) as T;
     }
-    console.log(`❌ Cache MISS: ${key}`);
+    // console.log(`❌ Cache MISS: ${key}`);
     return null;
   } catch (error) {
     console.error(`Error getting cache for ${key}:`, error);
@@ -33,7 +33,7 @@ const setCache = async <T>(
 ): Promise<void> => {
   try {
     await redisClient.setEx(key, ttl, JSON.stringify(data));
-    console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
+    // console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
   } catch (error) {
     console.error(`Error setting cache for ${key}:`, error);
   }
@@ -45,9 +45,9 @@ const invalidateCachePattern = async (pattern: string): Promise<void> => {
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
       await redisClient.del(keys);
-      console.log(
-        `🗑️  Invalidated ${keys.length} cache keys matching: ${pattern}`
-      );
+      // console.log(
+      //   `🗑️  Invalidated ${keys.length} cache keys matching: ${pattern}`
+      // );
     }
   } catch (error) {
     console.error(`Error invalidating cache pattern ${pattern}:`, error);
@@ -105,8 +105,9 @@ async function translateDocument(
       documentId,
       userId
     );
+    console.log("✅ Translation data received, saving to database...");
     await prisma.documentTranslation.create({ data: translationData });
-    console.log("✅ Translation complete\n");
+    console.log("✅ Translation complete and saved to database\n");
 
     // Invalidate translation and status caches immediately for real-time updates
     await Promise.all([
@@ -161,16 +162,6 @@ async function generateFlashcardsAndQuestions(
 
     if (!document || !document.extractedText) {
       console.log("❌ No document or extracted text found");
-      return;
-    }
-
-    const translation = await prisma.documentTranslation.findUnique({
-      where: { documentId },
-      select: { textEnglish: true },
-    });
-
-    if (!translation) {
-      console.log("❌ No translation found, skipping flashcard generation");
       return;
     }
 
@@ -340,19 +331,17 @@ export const saveDocument = async (c: Context) => {
             // Invalidate status cache after OCR completes
             await invalidateCachePattern(`document:status:${document.id}`);
 
-            return translateDocument(document.id, user.id, extractedText);
-          })
-          .then(async () => {
-            console.log(`✅ Translation completed for ${document.id}`);
-            // Invalidate status cache to show translation is complete
-            await invalidateCachePattern(`document:status:${document.id}`);
+            // Start translation (runs in parallel)
+            translateDocument(document.id, user.id, extractedText)
+              .catch((err: Error) => {
+                console.error(`❌ Translation error for ${document.id}:`, err);
+              });
+
+            // Generate flashcards immediately after OCR (don't wait for translation)
             return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
           })
           .then(async () => {
-            console.log(
-              `✅ Flashcards and questions generated for ${document.id}`
-            );
-            // Final invalidation to show everything is complete
+            console.log(`✅ Flashcards and questions generated for ${document.id}`);
             await invalidateCachePattern(`document:status:${document.id}`);
           })
           .catch((err: Error) => {
@@ -371,6 +360,107 @@ export const saveDocument = async (c: Context) => {
     });
   } catch (error) {
     console.error("Save document error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
+
+export const finalizeDocument = async (c: Context) => {
+  try {
+    const id = c.req.param("id");
+    const { categoryId } = await c.req.json();
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`🎯 FINALIZE DOCUMENT CALLED: ${id}`);
+    console.log(`📁 Category ID: ${categoryId}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    const user = c.get("user");
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    if (!categoryId || typeof categoryId !== "number") {
+      return c.json({ error: "Valid categoryId is required" }, 400);
+    }
+
+    // Verify document exists and belongs to user
+    const document = await prisma.document.findUnique({
+      where: { id },
+      include: {
+        translation: true,
+        flashcards: true,
+      },
+    });
+
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    // Check if flashcards already exist (prevent duplicate generation)
+    if (document.flashcards.length > 0) {
+      return c.json({
+        message: "Document already finalized",
+        status: "already_completed",
+        documentId: document.id,
+      });
+    }
+
+    // Wait for OCR if not ready yet (poll up to 2 minutes)
+    let ocrReady = !!document.extractedText;
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes (2 second intervals)
+
+    while (!ocrReady && attempts < maxAttempts) {
+      console.log(`⏳ Waiting for OCR... (attempt ${attempts + 1}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+      const updatedDoc = await prisma.document.findUnique({
+        where: { id },
+        select: { extractedText: true },
+      });
+
+      ocrReady = !!updatedDoc?.extractedText;
+      attempts++;
+
+      if (ocrReady) {
+        console.log(`✅ OCR ready after ${attempts * 2} seconds`);
+        break;
+      }
+    }
+
+    if (!ocrReady) {
+      return c.json({
+        error: "OCR timed out. Please try again later.",
+        status: "ocr_timeout",
+      }, 408);
+    }
+
+    console.log(`✅ OCR complete, proceeding with flashcard generation`);
+
+    // Update the document's categoryId immediately
+    await prisma.document.update({
+      where: { id },
+      data: { categoryId },
+    });
+
+    console.log(`🎯 Finalizing document ${id} with category ${categoryId}`);
+
+    // Generate flashcards and questions with the selected category
+    await generateFlashcardsAndQuestions(document.id, user.id, categoryId);
+
+    console.log(`✅ Document ${id} finalized successfully`);
+
+    return c.json({
+      message: "Document finalized successfully",
+      status: "completed",
+      documentId: document.id,
+    });
+  } catch (error) {
+    console.error("Finalize document error:", error);
     return c.json({ error: String(error) }, 500);
   }
 };

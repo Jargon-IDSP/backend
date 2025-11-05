@@ -10,6 +10,7 @@ import {
   triggerOCR,
   getDocumentStatus,
   getDocumentTranslation,
+  finalizeDocument,
 } from "../controllers/documentController";
 import { generateCustomForDocument } from "../controllers/customGenController";
 
@@ -23,7 +24,8 @@ export const documentRoute = new Hono()
   .get("/:id/download", getDownloadUrl)
   .get("/:id", getDocument)
   .delete("/:id", deleteDocument)
-  
+  .post("/:id/finalize", finalizeDocument)
+
   // Manual triggers (kept for testing, hidden from UI)
   .post("/:id/ocr", triggerOCR)
   .post("/:id/generate-custom", generateCustomForDocument);
