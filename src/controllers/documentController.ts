@@ -9,15 +9,12 @@ import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 import redisClient from "../lib/redis";
 
-// Helper function to get from cache
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
     const cached = await redisClient.get(key);
     if (cached) {
-      // console.log(`✅ Cache HIT: ${key}`);
       return JSON.parse(cached) as T;
     }
-    // console.log(`❌ Cache MISS: ${key}`);
     return null;
   } catch (error) {
     console.error(`Error getting cache for ${key}:`, error);
@@ -25,7 +22,6 @@ const getFromCache = async <T>(key: string): Promise<T | null> => {
   }
 };
 
-// Helper function to set cache
 const setCache = async <T>(
   key: string,
   data: T,
@@ -33,21 +29,16 @@ const setCache = async <T>(
 ): Promise<void> => {
   try {
     await redisClient.setEx(key, ttl, JSON.stringify(data));
-    // console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
   } catch (error) {
     console.error(`Error setting cache for ${key}:`, error);
   }
 };
 
-// Helper function to invalidate cache by pattern
 const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
       await redisClient.del(keys);
-      // console.log(
-      //   `🗑️  Invalidated ${keys.length} cache keys matching: ${pattern}`
-      // );
     }
   } catch (error) {
     console.error(`Error invalidating cache pattern ${pattern}:`, error);
@@ -109,7 +100,6 @@ async function translateDocument(
     await prisma.documentTranslation.create({ data: translationData });
     console.log("✅ Translation complete and saved to database\n");
 
-    // Invalidate translation and status caches immediately for real-time updates
     await Promise.all([
       invalidateCachePattern(`document:translation:${documentId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
@@ -177,7 +167,6 @@ async function generateFlashcardsAndQuestions(
       existingDbTermsEnglish,
     });
 
-    // Use provided categoryId if available, otherwise use AI categorization
     let categoryId: number;
     if (providedCategoryId) {
       categoryId = providedCategoryId;
@@ -221,7 +210,6 @@ async function generateFlashcardsAndQuestions(
       `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions\n`
     );
 
-    // Invalidate all related caches after flashcard generation
     console.log("🔄 Invalidating caches after flashcard generation...");
     await Promise.all([
       invalidateCachePattern(`custom:user:${userId}:*`),
@@ -231,8 +219,8 @@ async function generateFlashcardsAndQuestions(
       invalidateCachePattern(`quizzes:user:${userId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
       invalidateCachePattern(`documents:user:${userId}`),
-      invalidateCachePattern(`documents:category:${userId}:${categoryId}`), // Fixed: include userId in pattern
-      invalidateCachePattern(`categories:all:${userId}`), // Invalidate categories to update document counts
+      invalidateCachePattern(`documents:category:${userId}:${categoryId}`), 
+      invalidateCachePattern(`categories:all:${userId}`), 
     ]);
     console.log("✅ Cache invalidation complete");
 
@@ -303,11 +291,10 @@ export const saveDocument = async (c: Context) => {
         extractedText: extractedText || null,
         ocrProcessed: false,
         userId: user.id,
-        categoryId: categoryId || 6, // Default to General category (ID: 6)
+        categoryId: categoryId || 6, 
       },
     });
 
-    // Invalidate user's document list cache
     await invalidateCachePattern(`documents:user:${user.id}`);
     if (categoryId) {
       await invalidateCachePattern(`documents:category:${user.id}:${categoryId}`);
@@ -317,7 +304,6 @@ export const saveDocument = async (c: Context) => {
     if (ocrSupportedTypes.includes(fileType)) {
       console.log(`🚀 Starting background OCR extraction for ${filename}`);
 
-      // Run OCR and all processing fully asynchronously without blocking the response
       setImmediate(() => {
         extractTextWithOCR(document.id, user.id)
           .then(async (extractedText) => {
@@ -328,16 +314,13 @@ export const saveDocument = async (c: Context) => {
 
             console.log(`✅ OCR completed for ${document.id}`);
 
-            // Invalidate status cache after OCR completes
             await invalidateCachePattern(`document:status:${document.id}`);
 
-            // Start translation (runs in parallel)
             translateDocument(document.id, user.id, extractedText)
               .catch((err: Error) => {
                 console.error(`❌ Translation error for ${document.id}:`, err);
               });
 
-            // Generate flashcards immediately after OCR (don't wait for translation)
             return generateFlashcardsAndQuestions(document.id, user.id, categoryId);
           })
           .then(async () => {
@@ -383,7 +366,6 @@ export const finalizeDocument = async (c: Context) => {
       return c.json({ error: "Valid categoryId is required" }, 400);
     }
 
-    // Verify document exists and belongs to user
     const document = await prisma.document.findUnique({
       where: { id },
       include: {
@@ -400,7 +382,6 @@ export const finalizeDocument = async (c: Context) => {
       return c.json({ error: "Forbidden" }, 403);
     }
 
-    // Check if flashcards already exist (prevent duplicate generation)
     if (document.flashcards.length > 0) {
       return c.json({
         message: "Document already finalized",
@@ -409,14 +390,13 @@ export const finalizeDocument = async (c: Context) => {
       });
     }
 
-    // Wait for OCR if not ready yet (poll up to 2 minutes)
     let ocrReady = !!document.extractedText;
     let attempts = 0;
-    const maxAttempts = 60; // 2 minutes (2 second intervals)
+    const maxAttempts = 60; 
 
     while (!ocrReady && attempts < maxAttempts) {
       console.log(`⏳ Waiting for OCR... (attempt ${attempts + 1}/${maxAttempts})`);
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       const updatedDoc = await prisma.document.findUnique({
         where: { id },
@@ -441,7 +421,6 @@ export const finalizeDocument = async (c: Context) => {
 
     console.log(`✅ OCR complete, proceeding with flashcard generation`);
 
-    // Update the document's categoryId immediately
     await prisma.document.update({
       where: { id },
       data: { categoryId },
@@ -449,7 +428,6 @@ export const finalizeDocument = async (c: Context) => {
 
     console.log(`🎯 Finalizing document ${id} with category ${categoryId}`);
 
-    // Generate flashcards and questions with the selected category
     await generateFlashcardsAndQuestions(document.id, user.id, categoryId);
 
     console.log(`✅ Document ${id} finalized successfully`);
