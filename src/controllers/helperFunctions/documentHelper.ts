@@ -45,6 +45,46 @@ async function callGenAI(prompt: string): Promise<string> {
 }
 
 
+// Map user language preference to field name
+const LANGUAGE_MAP: Record<string, keyof DocumentTranslationData> = {
+  english: 'textEnglish',
+  french: 'textFrench',
+  chinese: 'textChinese',
+  spanish: 'textSpanish',
+  tagalog: 'textTagalog',
+  punjabi: 'textPunjabi',
+  korean: 'textKorean',
+};
+
+async function translateSingleLanguage(
+  text: string,
+  targetLanguage: string
+): Promise<string> {
+  if (targetLanguage === 'english') {
+    return text; // Already in English
+  }
+
+  const translatePrompt = `
+Translate the following text into ${targetLanguage}.
+Maintain the original formatting and structure as much as possible.
+Return ONLY the translated text, no JSON, no extra formatting.
+
+Text to translate:
+"""
+${text.slice(0, 8000)}
+"""
+`.trim();
+
+  return await callGenAI(translatePrompt);
+}
+
+export async function translateUserPreferredLanguage(
+  text: string,
+  userLanguage: string
+): Promise<string> {
+  return await translateSingleLanguage(text, userLanguage);
+}
+
 export async function translateFullDocument(
   ocrText: string,
   documentId: string,

@@ -103,7 +103,99 @@ export async function getQuiz(c: Context) {
   const userLanguage = await getUserLanguageFromContext(c);
 
   try {
-    // Check cache first
+    // Handle synthetic quiz IDs from quick cache
+    if (customQuizId.startsWith('quick-')) {
+      console.log(`🔄 Detected synthetic quiz ID ${customQuizId}, checking quick cache`);
+      const documentId = customQuizId.replace('quick-', '');
+
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
+
+      if (!quickCached) {
+        console.log(`❌ Quick cache not found for document ${documentId}`);
+        return c.json({ error: "Quiz not found - quick cache expired" }, 404);
+      }
+
+      const quickData = JSON.parse(quickCached);
+      console.log(`✅ Found quick cache for document ${documentId}`);
+
+      // Build enriched questions from quick cache
+      const enrichedQuestions = quickData.questions.map((questionOut: any) => {
+        const correctTermIndex = parseInt(questionOut.correctTermId) - 1;
+
+        if (correctTermIndex < 0 || correctTermIndex >= quickData.terms.length) {
+          console.error(`Invalid correctTermId: ${questionOut.correctTermId} for terms array of length ${quickData.terms.length}`);
+          return null;
+        }
+
+        const correctTerm = quickData.terms[correctTermIndex];
+
+        // Get the language we're querying for
+        const lang = userLanguage?.toLowerCase() || 'english';
+
+        // Build choices array with correct answer and 3 wrong answers
+        const allTerms = quickData.terms.filter((_: any, index: number) => index !== correctTermIndex);
+        const wrongTerms = allTerms.sort(() => 0.5 - Math.random()).slice(0, 3);
+
+        const allChoices = [
+          {
+            term: correctTerm.term.term[lang] || correctTerm.term.term.english,
+            isCorrect: true,
+            termId: correctTerm.id,
+          },
+          ...wrongTerms.map((term: any) => ({
+            term: term.term.term[lang] || term.term.term.english,
+            isCorrect: false,
+            termId: term.id,
+          }))
+        ];
+
+        // Shuffle and assign letter IDs (A, B, C, D)
+        const shuffledChoices = allChoices.sort(() => 0.5 - Math.random());
+        const choices = shuffledChoices.map((choice, index) => ({
+          ...choice,
+          id: String.fromCharCode(65 + index), // A, B, C, D
+        }));
+
+        // Build prompts object with ALL available languages from quick cache
+        // This allows translation button to work even if user's preference is different
+        const prompts: Record<string, string> = {};
+        const allLanguages = ['english', 'french', 'chinese', 'spanish', 'tagalog', 'punjabi', 'korean'];
+
+        for (const language of allLanguages) {
+          if (questionOut.prompt[language]) {
+            prompts[language] = questionOut.prompt[language];
+          }
+        }
+
+        console.log(`📝 Question ${questionOut.id} - Lang: ${lang}, Prompts:`, JSON.stringify(prompts));
+
+        return {
+          id: questionOut.id,
+          prompt: questionOut.prompt[lang] || questionOut.prompt.english,
+          prompts, // Include prompts for translation button
+          choices,
+          correctAnswer: correctTerm.term.term[lang] || correctTerm.term.term.english,
+          category: questionOut.category,
+        };
+      }).filter(Boolean);
+
+      const response = {
+        quiz: {
+          id: customQuizId,
+          name: 'Quick Quiz',
+          documentId,
+          questions: enrichedQuestions,
+          categoryId: quickData.categoryId,
+          quickTranslation: true,
+        },
+        language: userLanguage,
+      };
+
+      return c.json(response);
+    }
+
+    // Regular database quiz lookup
     const cacheKey = `quiz:${customQuizId}:${userLanguage}:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
