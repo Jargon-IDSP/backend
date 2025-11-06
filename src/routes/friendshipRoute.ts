@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import {
-  sendFriendRequest,
-  acceptFriendRequest,
-  rejectFriendRequest,
-  removeFriend,
+  followUser,
+  unfollowUser,
+  blockUser,
+  unblockUser,
+  getFollowing,
+  getFollowers,
   getFriends,
-  getPendingRequests,
-  getSentRequests,
+  getBlockedUsers,
   searchUsers,
 } from "../controllers/friendshipController";
 import { authMiddleware } from "../middleware/authMiddleware";
@@ -15,20 +16,21 @@ const friendshipRoute = new Hono();
 
 friendshipRoute.use("*", authMiddleware);
 
+// Search users
 friendshipRoute.get("/search", searchUsers);
 
-friendshipRoute.get("/", getFriends);
+// Get relationships
+friendshipRoute.get("/friends", getFriends);
+friendshipRoute.get("/following", getFollowing);
+friendshipRoute.get("/followers", getFollowers);
+friendshipRoute.get("/blocked", getBlockedUsers);
 
-friendshipRoute.get("/pending", getPendingRequests);
+// Follow/Unfollow
+friendshipRoute.post("/follow", followUser);
+friendshipRoute.delete("/:id/unfollow", unfollowUser);
 
-friendshipRoute.get("/sent", getSentRequests);
-
-friendshipRoute.post("/", sendFriendRequest);
-
-friendshipRoute.put("/:id/accept", acceptFriendRequest);
-
-friendshipRoute.delete("/:id/reject", rejectFriendRequest);
-
-friendshipRoute.delete("/:id", removeFriend);
+// Block/Unblock
+friendshipRoute.post("/block", blockUser);
+friendshipRoute.delete("/:id/unblock", unblockUser);
 
 export default friendshipRoute;

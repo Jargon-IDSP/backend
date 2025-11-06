@@ -10,41 +10,75 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum FriendshipStatus {
-  PENDING
-  ACCEPTED
+enum FollowStatus {
+  FOLLOWING
   BLOCKED
 }
 
-model Category {
-  id   Int    @id @default(autoincrement())
-  name String @unique
+enum QuizVisibility {
+  PRIVATE        // Only owner
+  FRIENDS        // All friends (mutual follows)
+  PUBLIC         // Everyone
+  SPECIFIC       // Specific users via CustomQuizShare table
+}
 
+enum QuizType {
+  TERM_TO_TRANSLATION
+  TRANSLATION_TO_DEFINITION
+  MIXED_QUESTIONS
+  BOSS_QUIZ
+}
+
+enum BadgeCategory {
+  QUIZ_COMPLETION
+  LEVEL_COMPLETION
+  STREAK
+  POINTS_MILESTONE
+  SPECIAL
+}
+
+model Category {
+  id        Int     @id @default(autoincrement())
+  name      String
+  userId    String?  // Null for default categories, set for custom categories
+  isDefault Boolean @default(false)
+
+  user             User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
   documents        Document[]
   customFlashcards CustomFlashcard[]
   customQuestions  CustomQuestion[]
   customQuizzes    CustomQuiz[]
 
+  @@unique([name, userId])  // Name must be unique per user, or unique for defaults (userId = null)
+  @@index([userId])
+  @@index([isDefault])
+  @@index([userId, isDefault])
   @@map("categories")
 }
 
 model Industry {
   id   Int    @id @default(autoincrement())
   name String @unique
-  
-  flashcards Flashcard[]
-  users      User[] 
-  
+
+  flashcards    Flashcard[]
+  users         User[]
+  prebuiltQuizzes PrebuiltQuiz[]
+  badges        Badge[]
+  apprenticeshipProgress UserApprenticeshipProgress[]
+
   @@map("industries")
 }
 
 model Level {
   id   Int    @id @default(autoincrement())
   name String @unique
-  
-  flashcards   Flashcard[]
-  quizAttempts UserQuizAttempt[]
-  
+
+  flashcards             Flashcard[]
+  quizAttempts           UserQuizAttempt[]
+  prebuiltQuizzes        PrebuiltQuiz[]
+  badges                 Badge[]
+  apprenticeshipProgress UserApprenticeshipProgress[]
+
   @@map("levels")
 }
 
@@ -108,6 +142,107 @@ model Question {
   @@map("questions")
 }
 
+model PrebuiltQuiz {
+  id        String   @id @default(cuid())
+  templateId String  @unique
+
+  levelId    Int
+  industryId Int?
+  quizNumber Int
+
+  name        String  @db.Text
+  description String? @db.Text
+
+  quizType      QuizType
+
+  questionsPerQuiz    Int     @default(10)
+  allowAIHelp         Boolean @default(true)
+  allowTranslation    Boolean @default(true)
+  allowBackNavigation Boolean @default(true)
+  pointsPerQuestion   Int     @default(5)
+  requiredToUnlock    Boolean @default(false)
+  passingScore        Int?
+
+  level    Level     @relation(fields: [levelId], references: [id])
+  industry Industry? @relation(fields: [industryId], references: [id])
+
+  attempts UserQuizAttempt[]
+
+  @@unique([levelId, industryId, quizNumber])
+  @@index([levelId])
+  @@index([levelId, industryId])
+  @@index([quizType])
+  @@index([quizNumber])
+  @@map("prebuilt_quizzes")
+}
+
+model Badge {
+  id          String   @id @default(cuid())
+  code        String   @unique
+
+  name        String @db.Text
+  description String @db.Text
+
+  iconUrl     String?
+  category    BadgeCategory
+
+  levelId      Int?
+  industryId   Int?
+
+  requiresQuizCount  Int?
+  requiresPoints     Int?
+
+  level    Level?     @relation(fields: [levelId], references: [id])
+  industry Industry?  @relation(fields: [industryId], references: [id])
+
+  userBadges UserBadge[]
+
+  @@index([category])
+  @@index([levelId])
+  @@index([industryId])
+  @@index([levelId, industryId])
+  @@map("badges")
+}
+
+model UserBadge {
+  id       String   @id @default(cuid())
+  userId   String
+  badgeId  String
+  earnedAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([badgeId])
+  @@index([earnedAt])
+  @@map("user_badges")
+}
+
+model UserApprenticeshipProgress {
+  id       String   @id @default(cuid())
+  userId   String
+  levelId  Int
+  industryId Int?
+
+  quizzesCompleted Int     @default(0)
+  isLevelComplete  Boolean @default(false)
+
+  unlockedAt   DateTime  @default(now())
+  completedAt  DateTime?
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level    Level     @relation(fields: [levelId], references: [id])
+  industry Industry? @relation(fields: [industryId], references: [id])
+
+  @@unique([userId, levelId, industryId])
+  @@index([userId])
+  @@index([userId, levelId])
+  @@index([levelId, industryId])
+  @@index([isLevelComplete])
+  @@map("user_apprenticeship_progress")
+}
 
 model Document {
   id            String    @id @default(cuid())
@@ -243,7 +378,8 @@ model CustomQuiz {
   name       String
   categoryId Int      @default(6) // Default to General category
 
-  pointsPerQuestion Int @default(10)
+  visibility        QuizVisibility @default(PRIVATE)
+  pointsPerQuestion Int            @default(10)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -258,8 +394,10 @@ model CustomQuiz {
   @@index([userId])
   @@index([categoryId])
   @@index([documentId])
+  @@index([visibility])
   @@index([userId, createdAt])
   @@index([userId, categoryId])
+  @@index([userId, visibility])
   @@map("custom_quizzes")
 }
 
@@ -283,61 +421,90 @@ model CustomQuizShare {
 
 model UserQuizAttempt {
   id String @id @default(cuid())
-  
-  userId       String
-  customQuizId String?  
-  levelId      Int?    
-  
-  questionsAnswered   Int @default(0)  
-  questionsCorrect    Int @default(0)  
+
+  userId         String
+  customQuizId   String?
+  prebuiltQuizId String?
+  levelId        Int?
+
+  questionIds String? @db.Text
+
+  questionsAnswered   Int @default(0)
+  questionsCorrect    Int @default(0)
   totalQuestions      Int
-  
-  percentComplete     Int @default(0)  
-  percentCorrect      Int @default(0)  
-  
+
+  percentComplete     Int @default(0)
+  percentCorrect      Int @default(0)
+
   pointsEarned        Int @default(0)
   maxPossiblePoints   Int
-  
+
   completed   Boolean  @default(false)
   startedAt   DateTime @default(now())
   completedAt DateTime?
-  
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customQuiz CustomQuiz? @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
-  level      Level?      @relation(fields: [levelId], references: [id], onDelete: SetNull)
-  answers    UserQuizAnswer[]
-  
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customQuiz   CustomQuiz?   @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  prebuiltQuiz PrebuiltQuiz? @relation(fields: [prebuiltQuizId], references: [id], onDelete: Cascade)
+  level        Level?        @relation(fields: [levelId], references: [id], onDelete: SetNull)
+
+  customAnswers    UserQuizAnswer[]
+  prebuiltAnswers  PrebuiltQuizAnswer[]
+
   @@index([userId])
   @@index([customQuizId])
+  @@index([prebuiltQuizId])
   @@index([levelId])
   @@index([completed])
   @@index([userId, completed])
-  @@index([userId, customQuizId]) 
+  @@index([userId, customQuizId])
+  @@index([userId, prebuiltQuizId])
   @@index([userId, levelId])
-  @@index([userId, completedAt])  // 👈 ADDED - speeds up history queries
+  @@index([userId, completedAt])
   @@map("user_quiz_attempts")
 }
 
 model UserQuizAnswer {
   id String @id @default(cuid())
-  
-  attemptId  String 
-  questionId String  
-  answerId   String  
-  
+
+  attemptId  String
+  questionId String
+  answerId   String
+
   isCorrect    Boolean
   pointsEarned Int @default(0)
-  
+
   answeredAt DateTime @default(now())
-  
+
   attempt  UserQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   question CustomQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
   answer   CustomFlashcard @relation("UserQuizAnswers", fields: [answerId], references: [id], onDelete: Cascade)
-  
+
   @@unique([attemptId, questionId])
   @@index([attemptId])
   @@index([questionId])
   @@map("user_quiz_answers")
+}
+
+model PrebuiltQuizAnswer {
+  id String @id @default(cuid())
+
+  attemptId  String
+  questionId String
+  answerId   String
+
+  isCorrect    Boolean
+  pointsEarned Int @default(0)
+
+  answeredAt DateTime @default(now())
+
+  attempt UserQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
+  @@index([answerId])
+  @@map("prebuilt_quiz_answers")
 }
 
 model UserWeeklyStats {
@@ -377,16 +544,19 @@ model User {
   documents            Document[]
   customFlashcards     CustomFlashcard[]
   customQuestions      CustomQuestion[]
-  customQuizzes        CustomQuiz[] 
+  customQuizzes        CustomQuiz[]
   quizAttempts         UserQuizAttempt[]
   documentTranslations DocumentTranslation[]
   weeklyStats          UserWeeklyStats[]
-  
+  badges               UserBadge[]
+  apprenticeshipProgress UserApprenticeshipProgress[]
+  customCategories     Category[]
+
   industry Industry? @relation(fields: [industryId], references: [id])
-  
-  friendshipsInitiated Friendship[] @relation("FriendshipRequester")
-  friendshipsReceived  Friendship[] @relation("FriendshipAddressee")
-  
+
+  following Follow[] @relation("UserFollowing")
+  followers Follow[] @relation("UserFollowers")
+
   sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes") 
   
   @@index([email])
@@ -423,23 +593,25 @@ model UserAvatar {
   @@map("user_avatars")
 }
 
-model Friendship {
+model Follow {
   id String @id @default(cuid())
-  
-  requesterId String
-  addresseeId String
-  
-  status FriendshipStatus @default(PENDING)
-  
+
+  followerId  String
+  followingId String
+
+  status FollowStatus @default(FOLLOWING)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
-  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
-  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
-  
-  @@unique([requesterId, addresseeId])
-  @@index([requesterId])
-  @@index([addresseeId])
+
+  follower  User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
   @@index([status])
-  @@map("friendships")
+  @@index([followerId, status])
+  @@index([followingId, status])
+  @@map("follows")
 }
