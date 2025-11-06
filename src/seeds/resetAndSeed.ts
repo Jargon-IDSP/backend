@@ -34,6 +34,22 @@ async function resetAndSeed() {
     });
     console.log('✅ Questions seeded\n');
 
+    // 4.5 Seed prebuilt quizzes
+    console.log('🎯 Seeding prebuilt quizzes...');
+    execSync('npx tsx src/seeds/prebuiltQuizSeeder.ts', {
+      cwd: path.join(__dirname, '../..'),
+      stdio: 'inherit',
+    });
+    console.log('✅ Prebuilt quizzes seeded\n');
+
+    // 4.6 Seed badges
+    console.log('🏅 Seeding badges...');
+    execSync('npx tsx src/seeds/badgeSeeder.ts', {
+      cwd: path.join(__dirname, '../..'),
+      stdio: 'inherit',
+    });
+    console.log('✅ Badges seeded\n');
+
     // 5. Migrate users from Clerk
     console.log('👥 Migrating users from Clerk...');
     execSync('npx tsx src/seeds/migrateUsers.ts', {

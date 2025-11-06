@@ -8,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 import redisClient from "../lib/redis";
+import { canAccessQuiz } from "./quizShareController";
 
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
@@ -419,7 +420,12 @@ async function generateFlashcardsFull(
         where: { id: documentId },
         data: { categoryId, ocrProcessed: true }
       }),
-      prisma.customQuiz.create({ data: quizData }),
+      prisma.customQuiz.create({
+        data: {
+          ...quizData,
+          visibility: 'PRIVATE', // Set default visibility to PRIVATE
+        }
+      }),
       ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
       ...questionData.map((data) => prisma.customQuestion.create({ data })),
     ]);
@@ -727,21 +733,25 @@ export const getDocument = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz share
+    // Check if user is owner or has access via quiz visibility
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Check if any quiz from this document has been shared with this user
-      const sharedQuiz = await prisma.customQuizShare.findFirst({
-        where: {
-          sharedWithUserId: user.id,
-          customQuiz: {
-            documentId: id,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      if (!sharedQuiz) {
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
         return c.json({ error: "Forbidden" }, 403);
       }
     }
@@ -774,21 +784,25 @@ export const getDownloadUrl = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz share
+    // Check if user is owner or has access via quiz visibility
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Check if any quiz from this document has been shared with this user
-      const sharedQuiz = await prisma.customQuizShare.findFirst({
-        where: {
-          sharedWithUserId: user.id,
-          customQuiz: {
-            documentId: id,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      if (!sharedQuiz) {
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
         return c.json({ error: "Forbidden" }, 403);
       }
     }
@@ -888,21 +902,25 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz share
+    // Check if user is owner or has access via quiz visibility
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Check if any quiz from this document has been shared with this user
-      const sharedQuiz = await prisma.customQuizShare.findFirst({
-        where: {
-          sharedWithUserId: user.id,
-          customQuiz: {
-            documentId: id,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      if (!sharedQuiz) {
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
         return c.json({ error: "Forbidden" }, 403);
       }
     }
@@ -1000,21 +1018,25 @@ export const getDocumentTranslation = async (c: Context) => {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      // Check if user is owner or has access via quiz share
+      // Check if user is owner or has access via quiz visibility
       const isOwner = document.userId === user.id;
 
       if (!isOwner) {
-        // Check if any quiz from this document has been shared with this user
-        const sharedQuiz = await prisma.customQuizShare.findFirst({
-          where: {
-            sharedWithUserId: user.id,
-            customQuiz: {
-              documentId: id,
-            },
-          },
+        // Get quizzes for this document
+        const quizzes = await prisma.customQuiz.findMany({
+          where: { documentId: id },
         });
 
-        if (!sharedQuiz) {
+        // Check if user can access any quiz from this document
+        let hasAccess = false;
+        for (const quiz of quizzes) {
+          if (await canAccessQuiz(user.id, quiz)) {
+            hasAccess = true;
+            break;
+          }
+        }
+
+        if (!hasAccess) {
           return c.json({ error: "Forbidden" }, 403);
         }
       }
@@ -1080,21 +1102,25 @@ export const getDocumentTranslation = async (c: Context) => {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      // Check if user is owner or has access via quiz share
+      // Check if user is owner or has access via quiz visibility
       const isOwner = document.userId === user.id;
 
       if (!isOwner) {
-        // Check if any quiz from this document has been shared with this user
-        const sharedQuiz = await prisma.customQuizShare.findFirst({
-          where: {
-            sharedWithUserId: user.id,
-            customQuiz: {
-              documentId: id,
-            },
-          },
+        // Get quizzes for this document
+        const quizzes = await prisma.customQuiz.findMany({
+          where: { documentId: id },
         });
 
-        if (!sharedQuiz) {
+        // Check if user can access any quiz from this document
+        let hasAccess = false;
+        for (const quiz of quizzes) {
+          if (await canAccessQuiz(user.id, quiz)) {
+            hasAccess = true;
+            break;
+          }
+        }
+
+        if (!hasAccess) {
           return c.json({ error: "Forbidden" }, 403);
         }
       }
@@ -1106,21 +1132,25 @@ export const getDocumentTranslation = async (c: Context) => {
       });
     }
 
-    // Check if user is owner or has access via quiz share
+    // Check if user is owner or has access via quiz visibility
     const isOwner = translation.document.userId === user.id;
 
     if (!isOwner) {
-      // Check if any quiz from this document has been shared with this user
-      const sharedQuiz = await prisma.customQuizShare.findFirst({
-        where: {
-          sharedWithUserId: user.id,
-          customQuiz: {
-            documentId: id,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      if (!sharedQuiz) {
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) {
         return c.json({ error: "Forbidden" }, 403);
       }
     }

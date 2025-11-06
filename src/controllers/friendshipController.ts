@@ -1,180 +1,294 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
 
-export const sendFriendRequest = async (c: Context) => {
+/**
+ * Follow a user
+ * Creates a one-way follow relationship
+ */
+export const followUser = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const { addresseeId } = await c.req.json();
+    const { followingId } = await c.req.json();
 
-    if (!addresseeId) {
-      return c.json({ success: false, error: "Addressee ID is required" }, 400);
+    if (!followingId) {
+      return c.json({ success: false, error: "User ID is required" }, 400);
     }
 
-    if (userId === addresseeId) {
-      return c.json({ success: false, error: "Cannot send friend request to yourself" }, 400);
+    if (userId === followingId) {
+      return c.json({ success: false, error: "Cannot follow yourself" }, 400);
     }
 
-    const addressee = await prisma.user.findUnique({
-      where: { id: addresseeId },
+    const userToFollow = await prisma.user.findUnique({
+      where: { id: followingId },
     });
 
-    if (!addressee) {
+    if (!userToFollow) {
       return c.json({ success: false, error: "User not found" }, 404);
     }
 
-    const existingFriendship = await prisma.friendship.findFirst({
+    // Check if already following
+    const existingFollow = await prisma.follow.findUnique({
       where: {
-        OR: [
-          { requesterId: userId, addresseeId },
-          { requesterId: addresseeId, addresseeId: userId },
-        ],
+        followerId_followingId: {
+          followerId: userId,
+          followingId,
+        },
       },
     });
 
-    if (existingFriendship) {
-      if (existingFriendship.status === "ACCEPTED") {
-        return c.json({ success: false, error: "Already friends" }, 400);
+    if (existingFollow) {
+      if (existingFollow.status === "BLOCKED") {
+        return c.json({ success: false, error: "Cannot follow this user" }, 400);
       }
-      return c.json({ success: false, error: "Friend request already sent" }, 400);
+      return c.json({ success: false, error: "Already following this user" }, 400);
     }
 
-    const friendship = await prisma.friendship.create({
-      data: {
-        requesterId: userId,
-        addresseeId,
-        status: "PENDING",
+    // Check if the other user blocked you
+    const blockedByThem = await prisma.follow.findFirst({
+      where: {
+        followerId: followingId,
+        followingId: userId,
+        status: "BLOCKED",
       },
     });
 
-    return c.json({ success: true, data: friendship });
+    if (blockedByThem) {
+      return c.json({ success: false, error: "Cannot follow this user" }, 403);
+    }
+
+    const follow = await prisma.follow.create({
+      data: {
+        followerId: userId,
+        followingId,
+        status: "FOLLOWING",
+      },
+    });
+
+    return c.json({ success: true, data: follow });
   } catch (error) {
-    console.error("Error sending friend request:", error);
-    return c.json({ success: false, error: "Failed to send friend request" }, 500);
+    console.error("Error following user:", error);
+    return c.json({ success: false, error: "Failed to follow user" }, 500);
   }
 };
 
-export const acceptFriendRequest = async (c: Context) => {
+/**
+ * Unfollow a user
+ * Removes the follow relationship
+ */
+export const unfollowUser = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const friendshipId = c.req.param("id");
+    const followId = c.req.param("id");
 
-    const friendship = await prisma.friendship.findUnique({
-      where: { id: friendshipId },
+    const follow = await prisma.follow.findUnique({
+      where: { id: followId },
     });
 
-    if (!friendship) {
-      return c.json({ success: false, error: "Friendship not found" }, 404);
+    if (!follow) {
+      return c.json({ success: false, error: "Follow relationship not found" }, 404);
     }
 
-    if (friendship.addresseeId !== userId) {
+    if (follow.followerId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
 
-    if (friendship.status !== "PENDING") {
-      return c.json({ success: false, error: "Friend request is not pending" }, 400);
-    }
-
-    const updatedFriendship = await prisma.friendship.update({
-      where: { id: friendshipId },
-      data: { status: "ACCEPTED" },
+    await prisma.follow.delete({
+      where: { id: followId },
     });
 
-    return c.json({ success: true, data: updatedFriendship });
+    return c.json({ success: true, message: "Unfollowed successfully" });
   } catch (error) {
-    console.error("Error accepting friend request:", error);
-    return c.json({ success: false, error: "Failed to accept friend request" }, 500);
+    console.error("Error unfollowing user:", error);
+    return c.json({ success: false, error: "Failed to unfollow user" }, 500);
   }
 };
 
-export const rejectFriendRequest = async (c: Context) => {
+/**
+ * Block a user
+ * Creates or updates follow relationship to BLOCKED status
+ */
+export const blockUser = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const friendshipId = c.req.param("id");
+    const { blockedUserId } = await c.req.json();
 
-    const friendship = await prisma.friendship.findUnique({
-      where: { id: friendshipId },
-    });
-
-    if (!friendship) {
-      return c.json({ success: false, error: "Friendship not found" }, 404);
+    if (!blockedUserId) {
+      return c.json({ success: false, error: "User ID is required" }, 400);
     }
 
-    if (friendship.addresseeId !== userId) {
-      return c.json({ success: false, error: "Unauthorized" }, 403);
+    if (userId === blockedUserId) {
+      return c.json({ success: false, error: "Cannot block yourself" }, 400);
     }
 
-    await prisma.friendship.delete({
-      where: { id: friendshipId },
+    // Create or update the block relationship
+    const block = await prisma.follow.upsert({
+      where: {
+        followerId_followingId: {
+          followerId: userId,
+          followingId: blockedUserId,
+        },
+      },
+      update: {
+        status: "BLOCKED",
+      },
+      create: {
+        followerId: userId,
+        followingId: blockedUserId,
+        status: "BLOCKED",
+      },
     });
 
-    return c.json({ success: true, message: "Friend request rejected" });
+    return c.json({ success: true, data: block });
   } catch (error) {
-    console.error("Error rejecting friend request:", error);
-    return c.json({ success: false, error: "Failed to reject friend request" }, 500);
+    console.error("Error blocking user:", error);
+    return c.json({ success: false, error: "Failed to block user" }, 500);
   }
 };
 
-export const removeFriend = async (c: Context) => {
+/**
+ * Unblock a user
+ * Removes the block relationship
+ */
+export const unblockUser = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const friendshipId = c.req.param("id");
+    const blockId = c.req.param("id");
 
-    const friendship = await prisma.friendship.findUnique({
-      where: { id: friendshipId },
+    const block = await prisma.follow.findUnique({
+      where: { id: blockId },
     });
 
-    if (!friendship) {
-      return c.json({ success: false, error: "Friendship not found" }, 404);
+    if (!block) {
+      return c.json({ success: false, error: "Block not found" }, 404);
     }
 
-    if (friendship.requesterId !== userId && friendship.addresseeId !== userId) {
+    if (block.followerId !== userId) {
       return c.json({ success: false, error: "Unauthorized" }, 403);
     }
 
-    await prisma.friendship.delete({
-      where: { id: friendshipId },
+    if (block.status !== "BLOCKED") {
+      return c.json({ success: false, error: "This is not a block relationship" }, 400);
+    }
+
+    await prisma.follow.delete({
+      where: { id: blockId },
     });
 
-    return c.json({ success: true, message: "Friend removed" });
+    return c.json({ success: true, message: "Unblocked successfully" });
   } catch (error) {
-    console.error("Error removing friend:", error);
-    return c.json({ success: false, error: "Failed to remove friend" }, 500);
+    console.error("Error unblocking user:", error);
+    return c.json({ success: false, error: "Failed to unblock user" }, 500);
   }
 };
 
+/**
+ * Get users you are following
+ */
+export const getFollowing = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+
+    const follows = await prisma.follow.findMany({
+      where: {
+        followerId: userId,
+        status: "FOLLOWING",
+      },
+      include: {
+        following: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            score: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    const following = follows.map((follow) => ({
+      followId: follow.id,
+      ...follow.following,
+      followedAt: follow.createdAt,
+    }));
+
+    return c.json({ success: true, data: following });
+  } catch (error) {
+    console.error("Error fetching following:", error);
+    return c.json({ success: false, error: "Failed to fetch following" }, 500);
+  }
+};
+
+/**
+ * Get your followers
+ */
+export const getFollowers = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+
+    const follows = await prisma.follow.findMany({
+      where: {
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+      include: {
+        follower: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            score: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    const followers = follows.map((follow) => ({
+      followId: follow.id,
+      ...follow.follower,
+      followedAt: follow.createdAt,
+    }));
+
+    return c.json({ success: true, data: followers });
+  } catch (error) {
+    console.error("Error fetching followers:", error);
+    return c.json({ success: false, error: "Failed to fetch followers" }, 500);
+  }
+};
+
+/**
+ * Get friends (mutual follows)
+ * Returns users where both users are following each other
+ */
 export const getFriends = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
 
-    const friendships = await prisma.friendship.findMany({
+    // Get all users you're following
+    const following = await prisma.follow.findMany({
       where: {
-        AND: [
-          {
-            OR: [
-              { requesterId: userId },
-              { addresseeId: userId },
-            ],
-          },
-          { status: "ACCEPTED" },
-        ],
+        followerId: userId,
+        status: "FOLLOWING",
       },
-      include: {
-        requester: {
-          select: {
-            id: true,
-            username: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            score: true,
-          },
-        },
-        addressee: {
+      select: {
+        followingId: true,
+        following: {
           select: {
             id: true,
             username: true,
@@ -187,14 +301,26 @@ export const getFriends = async (c: Context) => {
       },
     });
 
-    const friends = friendships.map((friendship) => {
-      const friend = friendship.requesterId === userId ? friendship.addressee : friendship.requester;
-      return {
-        friendshipId: friendship.id,
-        status: friendship.status,
-        ...friend,
-      };
+    const followingIds = following.map((f) => f.followingId);
+
+    // Get which of those users are also following you back (mutual)
+    const mutualFollows = await prisma.follow.findMany({
+      where: {
+        followerId: { in: followingIds },
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+      select: {
+        followerId: true,
+      },
     });
+
+    const mutualIds = new Set(mutualFollows.map((f) => f.followerId));
+
+    // Filter to only return mutual friends
+    const friends = following
+      .filter((f) => mutualIds.has(f.followingId))
+      .map((f) => f.following);
 
     return c.json({ success: true, data: friends });
   } catch (error) {
@@ -203,25 +329,27 @@ export const getFriends = async (c: Context) => {
   }
 };
 
-export const getPendingRequests = async (c: Context) => {
+/**
+ * Get blocked users
+ */
+export const getBlockedUsers = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
 
-    const friendships = await prisma.friendship.findMany({
+    const blocks = await prisma.follow.findMany({
       where: {
-        addresseeId: userId,
-        status: "PENDING",
+        followerId: userId,
+        status: "BLOCKED",
       },
       include: {
-        requester: {
+        following: {
           select: {
             id: true,
             username: true,
             firstName: true,
             lastName: true,
             email: true,
-            score: true,
           },
         },
       },
@@ -230,59 +358,22 @@ export const getPendingRequests = async (c: Context) => {
       },
     });
 
-    const requests = friendships.map((friendship) => ({
-      friendshipId: friendship.id,
-      ...friendship.requester,
-      createdAt: friendship.createdAt,
+    const blockedUsers = blocks.map((block) => ({
+      blockId: block.id,
+      ...block.following,
+      blockedAt: block.createdAt,
     }));
 
-    return c.json({ success: true, data: requests });
+    return c.json({ success: true, data: blockedUsers });
   } catch (error) {
-    console.error("Error fetching pending requests:", error);
-    return c.json({ success: false, error: "Failed to fetch pending requests" }, 500);
+    console.error("Error fetching blocked users:", error);
+    return c.json({ success: false, error: "Failed to fetch blocked users" }, 500);
   }
 };
 
-export const getSentRequests = async (c: Context) => {
-  try {
-    const user = c.get("user");
-    const userId = user.id;
-
-    const friendships = await prisma.friendship.findMany({
-      where: {
-        requesterId: userId,
-        status: "PENDING",
-      },
-      include: {
-        addressee: {
-          select: {
-            id: true,
-            username: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            score: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-    const requests = friendships.map((friendship) => ({
-      friendshipId: friendship.id,
-      ...friendship.addressee,
-      createdAt: friendship.createdAt,
-    }));
-
-    return c.json({ success: true, data: requests });
-  } catch (error) {
-    console.error("Error fetching sent requests:", error);
-    return c.json({ success: false, error: "Failed to fetch sent requests" }, 500);
-  }
-};
-
+/**
+ * Search users with follow status
+ */
 export const searchUsers = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -296,7 +387,7 @@ export const searchUsers = async (c: Context) => {
     const users = await prisma.user.findMany({
       where: {
         AND: [
-          { id: { not: userId } }, 
+          { id: { not: userId } },
           {
             OR: [
               { username: { contains: query } },
@@ -319,45 +410,58 @@ export const searchUsers = async (c: Context) => {
     });
 
     const userIds = users.map((u) => u.id);
-    const friendships = await prisma.friendship.findMany({
+
+    // Check which users you're following
+    const youFollowing = await prisma.follow.findMany({
       where: {
-        OR: [
-          { requesterId: userId, addresseeId: { in: userIds } },
-          { requesterId: { in: userIds }, addresseeId: userId },
-        ],
+        followerId: userId,
+        followingId: { in: userIds },
       },
     });
 
+    // Check which users are following you
+    const followingYou = await prisma.follow.findMany({
+      where: {
+        followerId: { in: userIds },
+        followingId: userId,
+      },
+    });
+
+    const youFollowingMap = new Map(
+      youFollowing.map((f) => [f.followingId, f])
+    );
+    const followingYouMap = new Map(
+      followingYou.map((f) => [f.followerId, f])
+    );
+
     const results = users.map((user) => {
-      const friendship = friendships.find(
-        (f) =>
-          (f.requesterId === userId && f.addresseeId === user.id) ||
-          (f.addresseeId === userId && f.requesterId === user.id)
-      );
+      const youFollow = youFollowingMap.get(user.id);
+      const theyFollow = followingYouMap.get(user.id);
 
-      let friendshipStatus = "none";
-      let friendshipId = null;
-      let status = null;
+      let relationshipStatus = "none";
+      let followId = null;
 
-      if (friendship) {
-        friendshipId = friendship.id;
-        status = friendship.status;
-        if (friendship.status === "ACCEPTED") {
-          friendshipStatus = "friends";
-        } else if (friendship.status === "BLOCKED") {
-          friendshipStatus = "blocked";
-        } else if (friendship.requesterId === userId) {
-          friendshipStatus = "pending_sent";
+      if (youFollow) {
+        followId = youFollow.id;
+        if (youFollow.status === "BLOCKED") {
+          relationshipStatus = "blocked_by_you";
+        } else if (theyFollow && theyFollow.status === "FOLLOWING") {
+          relationshipStatus = "friends"; // Mutual follow
         } else {
-          friendshipStatus = "pending_received";
+          relationshipStatus = "following";
+        }
+      } else if (theyFollow) {
+        if (theyFollow.status === "BLOCKED") {
+          relationshipStatus = "blocked_by_them";
+        } else {
+          relationshipStatus = "follower";
         }
       }
 
       return {
         ...user,
-        friendshipStatus,
-        friendshipId,
-        status,
+        relationshipStatus,
+        followId,
       };
     });
 
