@@ -207,6 +207,7 @@ export const getFollowing = async (c: Context) => {
             lastName: true,
             email: true,
             score: true,
+            industryId: true,
           },
         },
       },
@@ -216,7 +217,7 @@ export const getFollowing = async (c: Context) => {
     });
 
     const following = follows.map((follow) => ({
-      followId: follow.id,
+      friendshipId: follow.id,
       ...follow.following,
       followedAt: follow.createdAt,
     }));
@@ -250,6 +251,7 @@ export const getFollowers = async (c: Context) => {
             lastName: true,
             email: true,
             score: true,
+            industryId: true,
           },
         },
       },
@@ -259,7 +261,7 @@ export const getFollowers = async (c: Context) => {
     });
 
     const followers = follows.map((follow) => ({
-      followId: follow.id,
+      friendshipId: follow.id,
       ...follow.follower,
       followedAt: follow.createdAt,
     }));
@@ -287,6 +289,7 @@ export const getFriends = async (c: Context) => {
         status: "FOLLOWING",
       },
       select: {
+        id: true,
         followingId: true,
         following: {
           select: {
@@ -296,6 +299,7 @@ export const getFriends = async (c: Context) => {
             lastName: true,
             email: true,
             score: true,
+            industryId: true,
           },
         },
       },
@@ -320,7 +324,10 @@ export const getFriends = async (c: Context) => {
     // Filter to only return mutual friends
     const friends = following
       .filter((f) => mutualIds.has(f.followingId))
-      .map((f) => f.following);
+      .map((f) => ({
+        friendshipId: f.id,
+        ...f.following,
+      }));
 
     return c.json({ success: true, data: friends });
   } catch (error) {
@@ -438,30 +445,30 @@ export const searchUsers = async (c: Context) => {
       const youFollow = youFollowingMap.get(user.id);
       const theyFollow = followingYouMap.get(user.id);
 
-      let relationshipStatus = "none";
-      let followId = null;
+      let friendshipStatus = "none";
+      let friendshipId = null;
 
       if (youFollow) {
-        followId = youFollow.id;
+        friendshipId = youFollow.id;
         if (youFollow.status === "BLOCKED") {
-          relationshipStatus = "blocked_by_you";
+          friendshipStatus = "blocked_by_you";
         } else if (theyFollow && theyFollow.status === "FOLLOWING") {
-          relationshipStatus = "friends"; // Mutual follow
+          friendshipStatus = "friends"; // Mutual follow
         } else {
-          relationshipStatus = "following";
+          friendshipStatus = "following";
         }
       } else if (theyFollow) {
         if (theyFollow.status === "BLOCKED") {
-          relationshipStatus = "blocked_by_them";
+          friendshipStatus = "blocked_by_them";
         } else {
-          relationshipStatus = "follower";
+          friendshipStatus = "follower";
         }
       }
 
       return {
         ...user,
-        relationshipStatus,
-        followId,
+        friendshipStatus,
+        friendshipId,
       };
     });
 
