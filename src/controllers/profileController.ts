@@ -16,6 +16,7 @@ export const profile = async (c: Context) => {
       username: true,
       language: true,
       industryId: true,
+      introductionViewed: true,
       onboardingCompleted: true,
       score: true,
       createdAt: true,
@@ -93,5 +94,33 @@ export const updateOnboarding = async (c: Context) => {
   } catch (error) {
     console.error("Error updating onboarding preferences:", error);
     return c.json({ error: "Failed to update preferences" }, 500);
+  }
+};
+
+export const markIntroductionViewed = async (c: Context) => {
+  const user = c.get("user");
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        introductionViewed: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        introductionViewed: true,
+        onboardingCompleted: true,
+      }
+    });
+
+    return c.json({
+      message: "Introduction marked as viewed",
+      user: updatedUser
+    }, 200);
+
+  } catch (error) {
+    console.error("Error marking introduction as viewed:", error);
+    return c.json({ error: "Failed to update introduction status" }, 500);
   }
 };
