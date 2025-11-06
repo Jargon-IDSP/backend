@@ -476,6 +476,107 @@ export const shareWithMultipleFriends = async (c: Context) => {
 };
 
 /**
+ * Get quizzes from a specific user
+ * Shows PUBLIC quizzes and FRIENDS quizzes if they're friends
+ */
+export const getUserSharedQuizzes = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const targetUserId = c.req.param("userId");
+
+    if (!targetUserId) {
+      return c.json({ success: false, error: "Missing userId parameter" }, 400);
+    }
+
+    // Check if they're friends (mutual follow)
+    const yourFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: currentUserId,
+          followingId: targetUserId,
+        },
+      },
+    });
+
+    const theirFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: targetUserId,
+          followingId: currentUserId,
+        },
+      },
+    });
+
+    const areFriends =
+      yourFollow?.status === "FOLLOWING" &&
+      theirFollow?.status === "FOLLOWING";
+
+    // Build query conditions based on friendship status
+    const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+
+    if (areFriends) {
+      visibilityConditions.push({ visibility: "FRIENDS" });
+    }
+
+    // Get quizzes from the target user
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: targetUserId,
+        OR: visibilityConditions,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            userId: true,
+            isDefault: true,
+          },
+        },
+        _count: {
+          select: { questions: true },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Map custom categories to general (id: 6) for non-owners
+    const mappedQuizzes = quizzes.map((quiz) => {
+      // If the quiz has a custom category (userId is set), map it to general for viewers
+      if (quiz.category.userId !== null && quiz.category.userId !== currentUserId) {
+        return {
+          ...quiz,
+          categoryId: 6, // General category
+          category: {
+            id: 6,
+            name: "General",
+            userId: null,
+            isDefault: true,
+          },
+        };
+      }
+      return quiz;
+    });
+
+    return c.json({ success: true, data: mappedQuizzes });
+  } catch (error) {
+    console.error("Error fetching user quizzes:", error);
+    return c.json({ success: false, error: "Failed to fetch user quizzes" }, 500);
+  }
+};
+
+/**
  * Check if user can access a quiz
  * Helper function used by quiz controller
  */

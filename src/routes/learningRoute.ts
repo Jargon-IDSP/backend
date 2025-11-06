@@ -49,12 +49,12 @@ import {
 } from "../controllers/quizController";
 
 import {
-  shareQuiz,
+  shareQuizWithFriend,
   unshareQuiz,
   getQuizShares,
   getSharedWithMe,
   getMySharedQuizzes,
-  shareWithMultiple,
+  shareWithMultipleFriends,
   getUserSharedQuizzes,
 } from "../controllers/quizShareController";
 
@@ -119,8 +119,8 @@ const quizAttemptRoutes = new Hono()
   .get("/stats/user", getStats);
 
 const sharingRoutes = new Hono()
-  .post("/share", shareQuiz)
-  .post("/share-multiple", shareWithMultiple)
+  .post("/share", shareQuizWithFriend)
+  .post("/share-multiple", shareWithMultipleFriends)
   .delete("/:shareId", unshareQuiz)
 
   .get("/quiz/:quizId/shares", getQuizShares)
