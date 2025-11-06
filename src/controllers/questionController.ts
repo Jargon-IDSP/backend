@@ -1613,6 +1613,128 @@ export const getCustomQuizzesByUser = async (c: Context) => {
   }
 };
 
+/**
+ * Get custom quiz count for a specific user
+ * Returns the total count of all custom quizzes created by the user
+ */
+export const getCustomQuizCountByUser = async (c: Context) => {
+  try {
+    const userId = c.req.param("userId");
+
+    if (!userId) {
+      return errorResponse(c, "User ID is required", 400);
+    }
+
+    const count = await prisma.customQuiz.count({
+      where: { userId },
+    });
+
+    return c.json({ success: true, data: { count } });
+  } catch (error: any) {
+    console.error("Error fetching custom quiz count by user:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch custom quiz count",
+      500
+    );
+  }
+};
+
+/**
+ * Get lesson names (custom quiz names) for a user
+ * Returns only id and name, respecting lesson request access
+ */
+export const getUserLessonNames = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const targetUserId = c.req.param("userId");
+
+    if (!targetUserId) {
+      return errorResponse(c, "User ID is required", 400);
+    }
+
+    // Check if they're friends (mutual follow)
+    const yourFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: currentUserId,
+          followingId: targetUserId,
+        },
+      },
+    });
+
+    const theirFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: targetUserId,
+          followingId: currentUserId,
+        },
+      },
+    });
+
+    const areFriends =
+      yourFollow?.status === "FOLLOWING" &&
+      theirFollow?.status === "FOLLOWING";
+
+    // Check if user has lesson request access
+    const lessonRequest = await prisma.lessonRequest.findUnique({
+      where: {
+        requesterId_recipientId: {
+          requesterId: currentUserId,
+          recipientId: targetUserId,
+        },
+      },
+    });
+
+    const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
+
+    // If user has lesson access, return ALL lessons regardless of visibility
+    // Otherwise, build query conditions based on friendship status
+    let whereCondition: any;
+
+    if (hasLessonAccess) {
+      // Return all lessons when lesson request is accepted
+      whereCondition = {
+        userId: targetUserId,
+      };
+    } else {
+      // Build query conditions based on friendship status
+      const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+
+      if (areFriends) {
+        visibilityConditions.push({ visibility: "FRIENDS" });
+      }
+
+      whereCondition = {
+        userId: targetUserId,
+        OR: visibilityConditions,
+      };
+    }
+
+    // Get only id and name from lessons
+    const lessons = await prisma.customQuiz.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        name: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return c.json({ success: true, data: lessons });
+  } catch (error: any) {
+    console.error("Error fetching user lesson names:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch lesson names",
+      500
+    );
+  }
+};
+
 export const getAllCategories = async (c: Context) => {
   try {
     const user = c.get("user");

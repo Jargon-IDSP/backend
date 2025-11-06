@@ -512,19 +512,44 @@ export const getUserSharedQuizzes = async (c: Context) => {
       yourFollow?.status === "FOLLOWING" &&
       theirFollow?.status === "FOLLOWING";
 
-    // Build query conditions based on friendship status
-    const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+    // Check if user has lesson request access
+    const lessonRequest = await prisma.lessonRequest.findUnique({
+      where: {
+        requesterId_recipientId: {
+          requesterId: currentUserId,
+          recipientId: targetUserId,
+        },
+      },
+    });
 
-    if (areFriends) {
-      visibilityConditions.push({ visibility: "FRIENDS" });
+    const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
+
+    // If user has lesson access, return ALL quizzes regardless of visibility
+    // Otherwise, build query conditions based on friendship status
+    let whereCondition: any;
+
+    if (hasLessonAccess) {
+      // Return all quizzes when lesson request is accepted
+      whereCondition = {
+        userId: targetUserId,
+      };
+    } else {
+      // Build query conditions based on friendship status
+      const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+
+      if (areFriends) {
+        visibilityConditions.push({ visibility: "FRIENDS" });
+      }
+
+      whereCondition = {
+        userId: targetUserId,
+        OR: visibilityConditions,
+      };
     }
 
     // Get quizzes from the target user
     const quizzes = await prisma.customQuiz.findMany({
-      where: {
-        userId: targetUserId,
-        OR: visibilityConditions,
-      },
+      where: whereCondition,
       include: {
         user: {
           select: {

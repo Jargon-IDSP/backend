@@ -274,6 +274,56 @@ export const getFollowers = async (c: Context) => {
 };
 
 /**
+ * Get follower count for a specific user
+ */
+export const getFollowerCount = async (c: Context) => {
+  try {
+    const userId = c.req.param("userId");
+    
+    if (!userId) {
+      return c.json({ success: false, error: "User ID is required" }, 400);
+    }
+
+    const count = await prisma.follow.count({
+      where: {
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+    });
+
+    return c.json({ success: true, data: { count } });
+  } catch (error) {
+    console.error("Error fetching follower count:", error);
+    return c.json({ success: false, error: "Failed to fetch follower count" }, 500);
+  }
+};
+
+/**
+ * Get following count for a specific user
+ */
+export const getFollowingCount = async (c: Context) => {
+  try {
+    const userId = c.req.param("userId");
+    
+    if (!userId) {
+      return c.json({ success: false, error: "User ID is required" }, 400);
+    }
+
+    const count = await prisma.follow.count({
+      where: {
+        followerId: userId,
+        status: "FOLLOWING",
+      },
+    });
+
+    return c.json({ success: true, data: { count } });
+  } catch (error) {
+    console.error("Error fetching following count:", error);
+    return c.json({ success: false, error: "Failed to fetch following count" }, 500);
+  }
+};
+
+/**
  * Get friends (mutual follows)
  * Returns users where both users are following each other
  */

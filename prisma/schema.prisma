@@ -525,6 +525,9 @@ model User {
 
   sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")
 
+  lessonRequestsSent LessonRequest[] @relation("LessonRequestsSent")
+  lessonRequestsReceived LessonRequest[] @relation("LessonRequestsReceived")
+
   @@index([email])
   @@index([score])
   @@index([industryId])
@@ -574,5 +577,33 @@ model Follow {
   @@index([followerId, status])
   @@index([followingId, status])
   @@map("follows")
+}
+
+enum LessonRequestStatus {
+  PENDING
+  ACCEPTED
+  DENIED
+}
+
+model LessonRequest {
+  id String @id @default(cuid())
+
+  requesterId String
+  recipientId String
+
+  status LessonRequestStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requester User @relation("LessonRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient User @relation("LessonRequestsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, recipientId])
+  @@index([requesterId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([recipientId, status])
+  @@map("lesson_requests")
 }
 

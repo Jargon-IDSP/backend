@@ -24,6 +24,8 @@ import {
   getCustomQuizzesByDocument,
   getCustomQuizzesByUser,
   getCustomQuizzesByCategory,
+  getCustomQuizCountByUser,
+  getUserLessonNames,
   getDocumentsByCategory,
   getCustomQuizById,
   getCustomQuizByDocument, // Added this new function
@@ -55,7 +57,6 @@ import {
   getSharedWithMe,
   getMySharedQuizzes,
   shareWithMultipleFriends,
-  getUserSharedQuizzes,
 } from "../controllers/quizShareController";
 
 export const learningRoute = new Hono();
@@ -88,6 +89,8 @@ const customRoutes = new Hono()
   .get("/terms", getCustomFlashcardsByUser)
   .get("/questions", getCustomQuestionsByUser)
   .get("/quizzes", getCustomQuizzesByUser)
+  .get("/users/:userId/quizzes/count", getCustomQuizCountByUser)
+  .get("/users/:userId/lessons", getUserLessonNames)
 
   .get("/random/flashcard", getRandomCustomFlashcard)
   .get("/random/question", getRandomCustomQuestion)
@@ -125,8 +128,7 @@ const sharingRoutes = new Hono()
 
   .get("/quiz/:quizId/shares", getQuizShares)
   .get("/shared-with-me", getSharedWithMe)
-  .get("/my-shared", getMySharedQuizzes)
-  .get("/user/:userId/quizzes", getUserSharedQuizzes);
+  .get("/my-shared", getMySharedQuizzes);
 
 learningRoute.route("/existing", existingRoutes);
 learningRoute.route("/custom", customRoutes);
