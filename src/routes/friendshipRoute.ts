@@ -7,6 +7,8 @@ import {
   unblockUser,
   getFollowing,
   getFollowers,
+  getFollowerCount,
+  getFollowingCount,
   getFriends,
   getBlockedUsers,
   searchUsers,
@@ -25,6 +27,10 @@ friendshipRoute.get("/friends", getFriends);
 friendshipRoute.get("/following", getFollowing);
 friendshipRoute.get("/followers", getFollowers);
 friendshipRoute.get("/blocked", getBlockedUsers);
+
+// Get counts for a specific user
+friendshipRoute.get("/:userId/followers/count", getFollowerCount);
+friendshipRoute.get("/:userId/following/count", getFollowingCount);
 
 // Follow/Unfollow
 friendshipRoute.post("/follow", followUser);

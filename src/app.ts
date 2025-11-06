@@ -14,6 +14,7 @@ import friendshipRoute from "./routes/friendshipRoute";
 import quizShareRoute from "./routes/quizShareRoute";
 import weeklyStatsRoute from "./routes/weeklyStatsRoute";
 import categoryRoute from "./routes/categoryRoute";
+import lessonRequestRoute from "./routes/lessonRequestRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
@@ -82,6 +83,7 @@ app.route("/friendships", friendshipRoute);
 app.route("/quiz-shares", quizShareRoute);
 app.route("/weekly-tracking", weeklyStatsRoute);
 app.route("/categories", categoryRoute);
+app.route("/lesson-requests", lessonRequestRoute);
 
 // 404 handler
 app.notFound((c) => c.json({ error: "Not Found" }, 404));
