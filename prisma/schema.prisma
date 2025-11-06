@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -48,6 +45,7 @@ model Category {
   customFlashcards CustomFlashcard[]
   customQuestions  CustomQuestion[]
   customQuizzes    CustomQuiz[]
+  documents        Document[]
 
   @@unique([name, userId])  // Name must be unique per user, or unique for defaults (userId = null)
   @@index([userId])
@@ -83,32 +81,27 @@ model Level {
 }
 
 model Flashcard {
-  id String @id
-  
-  termEnglish  String @db.Text
-  termFrench   String @db.Text
-  termChinese String @db.Text
-  termSpanish  String @db.Text
-  termTagalog  String @db.Text
-  termPunjabi  String @db.Text
-  termKorean   String @db.Text
-  
-  definitionEnglish  String @db.Text
-  definitionFrench   String @db.Text
-  definitionChinese String @db.Text
-  definitionSpanish  String @db.Text
-  definitionTagalog  String @db.Text
-  definitionPunjabi  String @db.Text
-  definitionKorean   String @db.Text
+  id                String     @id
+  termEnglish       String     @db.Text
+  termFrench        String     @db.Text
+  termChinese       String     @db.Text
+  termSpanish       String     @db.Text
+  termTagalog       String     @db.Text
+  termPunjabi       String     @db.Text
+  termKorean        String     @db.Text
+  definitionEnglish String     @db.Text
+  definitionFrench  String     @db.Text
+  definitionChinese String     @db.Text
+  definitionSpanish String     @db.Text
+  definitionTagalog String     @db.Text
+  definitionPunjabi String     @db.Text
+  definitionKorean  String     @db.Text
+  industryId        Int?
+  levelId           Int
+  industry          Industry?  @relation(fields: [industryId], references: [id])
+  level             Level      @relation(fields: [levelId], references: [id])
+  questions         Question[] @relation("QuestionCorrectAnswer")
 
-  industryId Int?
-  levelId    Int
-
-  industry Industry? @relation(fields: [industryId], references: [id])
-  level    Level    @relation(fields: [levelId], references: [id])
-  
-  questions Question[] @relation("QuestionCorrectAnswer")
-  
   @@index([levelId, industryId])
   @@index([industryId, levelId])
   @@index([levelId])
@@ -117,25 +110,20 @@ model Flashcard {
 }
 
 model Question {
-  id String @id
-  
+  id            String    @id
   correctTermId String
-  
-  promptEnglish  String @db.Text
-  promptFrench   String @db.Text
-  promptChinese String @db.Text
-  promptSpanish  String @db.Text
-  promptTagalog  String @db.Text
-  promptPunjabi  String @db.Text
-  promptKorean   String @db.Text
-  
-  difficulty Int
-  tags String @db.Text
-  
-  points Int     @default(5)
-  
+  promptEnglish String    @db.Text
+  promptFrench  String    @db.Text
+  promptChinese String    @db.Text
+  promptSpanish String    @db.Text
+  promptTagalog String    @db.Text
+  promptPunjabi String    @db.Text
+  promptKorean  String    @db.Text
+  difficulty    Int
+  tags          String    @db.Text
+  points        Int       @default(5)
   correctAnswer Flashcard @relation("QuestionCorrectAnswer", fields: [correctTermId], references: [id])
-  
+
   @@index([correctTermId], map: "questions_correctTermId_fkey")
   @@index([difficulty])
   @@index([points])
@@ -245,24 +233,23 @@ model UserApprenticeshipProgress {
 }
 
 model Document {
-  id            String    @id @default(cuid())
+  id            String               @id @default(cuid())
   filename      String
   fileKey       String
   fileUrl       String
   fileType      String
   fileSize      Int?
-  extractedText String?   @db.Text
-  ocrProcessed  Boolean   @default(false)
+  extractedText String?              @db.Text
+  ocrProcessed  Boolean              @default(false)
   userId        String
-  categoryId    Int       @default(6) // Default to General category
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category      Category            @relation(fields: [categoryId], references: [id])
+  categoryId    Int                  @default(6)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
   flashcards    CustomFlashcard[]
   customQuizzes CustomQuiz[]
   translation   DocumentTranslation?
+  category      Category             @relation(fields: [categoryId], references: [id])
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([categoryId])
@@ -273,62 +260,52 @@ model Document {
 }
 
 model DocumentTranslation {
-  id String @id @default(cuid())
-  
-  documentId String @unique
-  userId     String
-  
-  textEnglish  String @db.LongText
-  textFrench   String @db.LongText
-  textChinese  String @db.LongText
-  textSpanish  String @db.LongText
-  textTagalog  String @db.LongText
-  textPunjabi  String @db.LongText
-  textKorean   String @db.LongText
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  documentId  String   @unique
+  userId      String
+  textEnglish String   @db.LongText
+  textFrench  String   @db.LongText
+  textChinese String   @db.LongText
+  textSpanish String   @db.LongText
+  textTagalog String   @db.LongText
+  textPunjabi String   @db.LongText
+  textKorean  String   @db.LongText
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   @@index([documentId])
   @@index([userId])
   @@map("document_translations")
 }
 
-
 model CustomFlashcard {
-  id String @id @default(cuid())
-
-  documentId String?
-  userId     String
-  categoryId Int      @default(6) // Default to General category
-
-  termEnglish  String @db.Text
-  termFrench   String @db.Text
-  termChinese  String @db.Text
-  termSpanish  String @db.Text
-  termTagalog  String @db.Text
-  termPunjabi  String @db.Text
-  termKorean   String @db.Text
-
-  definitionEnglish  String @db.Text
-  definitionFrench   String @db.Text
-  definitionChinese  String @db.Text
-  definitionSpanish  String @db.Text
-  definitionTagalog  String @db.Text
-  definitionPunjabi  String @db.Text
-  definitionKorean   String @db.Text
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category    Category            @relation(fields: [categoryId], references: [id])
-  document    Document?           @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  questions   CustomQuestion[]    @relation("CustomQuestionCorrectAnswer")
-  userAnswers UserQuizAnswer[]    @relation("UserQuizAnswers")
+  id                String           @id @default(cuid())
+  documentId        String?
+  userId            String
+  categoryId        Int              @default(6)
+  termEnglish       String           @db.Text
+  termFrench        String           @db.Text
+  termChinese       String           @db.Text
+  termSpanish       String           @db.Text
+  termTagalog       String           @db.Text
+  termPunjabi       String           @db.Text
+  termKorean        String           @db.Text
+  definitionEnglish String           @db.Text
+  definitionFrench  String           @db.Text
+  definitionChinese String           @db.Text
+  definitionSpanish String           @db.Text
+  definitionTagalog String           @db.Text
+  definitionPunjabi String           @db.Text
+  definitionKorean  String           @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  category          Category         @relation(fields: [categoryId], references: [id])
+  document          Document?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions         CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
+  userAnswers       UserQuizAnswer[] @relation("UserQuizAnswers")
 
   @@index([userId, createdAt])
   @@index([documentId, createdAt])
@@ -338,29 +315,24 @@ model CustomFlashcard {
 }
 
 model CustomQuestion {
-  id String @id @default(cuid())
-
+  id            String           @id @default(cuid())
   userId        String
   customQuizId  String?
   correctTermId String
-  categoryId    Int      @default(6) // Default to General category
-
-  promptEnglish  String @db.Text
-  promptFrench   String @db.Text
-  promptChinese  String @db.Text
-  promptSpanish  String @db.Text
-  promptTagalog  String @db.Text
-  promptPunjabi  String @db.Text
-  promptKorean   String @db.Text
-
-  pointsWorth Int @default(10)
-
-  createdAt DateTime @default(now())
-
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category      Category        @relation(fields: [categoryId], references: [id])
-  correctAnswer CustomFlashcard @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id], onDelete: Cascade)
-  customQuiz    CustomQuiz?     @relation(fields: [customQuizId], references: [id], onDelete: SetNull)
+  categoryId    Int              @default(6)
+  promptEnglish String           @db.Text
+  promptFrench  String           @db.Text
+  promptChinese String           @db.Text
+  promptSpanish String           @db.Text
+  promptTagalog String           @db.Text
+  promptPunjabi String           @db.Text
+  promptKorean  String           @db.Text
+  pointsWorth   Int              @default(10)
+  createdAt     DateTime         @default(now())
+  category      Category         @relation(fields: [categoryId], references: [id])
+  correctAnswer CustomFlashcard  @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id], onDelete: Cascade)
+  customQuiz    CustomQuiz?      @relation(fields: [customQuizId], references: [id])
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   userAnswers   UserQuizAnswer[]
 
   @@index([userId, createdAt])
@@ -402,22 +374,18 @@ model CustomQuiz {
 }
 
 model CustomQuizShare {
-  id String @id @default(cuid())
-  
-  customQuizId String
+  id               String     @id @default(cuid())
+  customQuizId     String
   sharedWithUserId String
-  
-  sharedAt DateTime @default(now())
-  
-  customQuiz CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
-  sharedWith User       @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
-  
+  sharedAt         DateTime   @default(now())
+  customQuiz       CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  sharedWith       User       @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+
   @@unique([customQuizId, sharedWithUserId])
   @@index([customQuizId])
   @@index([sharedWithUserId])
   @@map("custom_quiz_shares")
 }
-
 
 model UserQuizAttempt {
   id String @id @default(cuid())
@@ -483,6 +451,7 @@ model UserQuizAnswer {
   @@unique([attemptId, questionId])
   @@index([attemptId])
   @@index([questionId])
+  @@index([answerId], map: "user_quiz_answers_answerId_fkey")
   @@map("user_quiz_answers")
 }
 
@@ -508,18 +477,15 @@ model PrebuiltQuizAnswer {
 }
 
 model UserWeeklyStats {
-  id String @id @default(cuid())
-  userId String
-  
-  weekStartDate DateTime 
-  weeklyScore Int @default(0)
-  daysActive String @default("") 
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id            String   @id @default(cuid())
+  userId        String
+  weekStartDate DateTime
+  weeklyScore   Int      @default(0)
+  daysActive    String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([userId, weekStartDate])
   @@index([userId])
   @@index([weekStartDate])
@@ -528,25 +494,27 @@ model UserWeeklyStats {
 }
 
 model User {
-  id        String   @id
-  email     String
-  firstName String?
-  lastName  String?
-  username  String?
-  language  String   @default("english")
-  industryId Int?
-  onboardingCompleted Boolean @default(false)
-  score     Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  avatar               UserAvatar?
-  documents            Document[]
+  id                   String                @id
+  email                String
+  firstName            String?
+  lastName             String?
+  username             String?
+  language             String                @default("english")
+  industryId           Int?
+  onboardingCompleted  Boolean               @default(false)
+  score                Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   customFlashcards     CustomFlashcard[]
   customQuestions      CustomQuestion[]
   customQuizzes        CustomQuiz[]
   quizAttempts         UserQuizAttempt[]
   documentTranslations DocumentTranslation[]
+  documents            Document[]
+  friendshipsReceived  Friendship[]          @relation("FriendshipAddressee")
+  friendshipsInitiated Friendship[]          @relation("FriendshipRequester")
+  avatar               UserAvatar?
+  quizAttempts         UserQuizAttempt[]
   weeklyStats          UserWeeklyStats[]
   badges               UserBadge[]
   apprenticeshipProgress UserApprenticeshipProgress[]
@@ -567,28 +535,22 @@ model User {
 }
 
 model UserAvatar {
-  id     String @id @default(cuid())
-  userId String @unique
-  
-  character String @default("rocky")
-  
-  outfit       String @default("default")
-  hatType      String?
-  accessory1   String?
-  accessory2   String?
-  accessory3   String?
-  
-  primaryColor   String @default("#FFB6C1")
-  secondaryColor String @default("#FF69B4")
-  accentColor    String @default("#FFC0CB")
-  
-  unlockedItems String? @db.Text
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  character      String   @default("rocky")
+  outfit         String   @default("default")
+  hatType        String?
+  accessory1     String?
+  accessory2     String?
+  accessory3     String?
+  primaryColor   String   @default("#FFB6C1")
+  secondaryColor String   @default("#FF69B4")
+  accentColor    String   @default("#FFC0CB")
+  unlockedItems  String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@map("user_avatars")
 }
@@ -615,3 +577,4 @@ model Follow {
   @@index([followingId, status])
   @@map("follows")
 }
+
