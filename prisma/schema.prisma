@@ -368,6 +368,8 @@ model User {
   username  String?
   language  String   @default("english")
   industryId Int?
+  badges    String?  @db.Text  // Existing column in database
+  introductionViewed Boolean @default(false)
   onboardingCompleted Boolean @default(false)
   score     Int      @default(0)
   createdAt DateTime @default(now())
