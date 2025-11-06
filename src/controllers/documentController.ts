@@ -841,11 +841,13 @@ export const getDocumentStatus = async (c: Context) => {
     const cacheKey = `document:status:${id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
+      console.log(`✅ Cache HIT: ${cacheKey}`);
       if (cached.document.userId !== user.id) {
         return c.json({ error: "Forbidden" }, 403);
       }
       return c.json(cached);
     }
+    console.log(`❌ Cache MISS: ${cacheKey}`);
 
     const document = await prisma.document.findUnique({
       where: { id },
