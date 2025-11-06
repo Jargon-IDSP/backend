@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import {
-  shareQuiz,
+  updateQuizVisibility,
+  shareQuizWithFriend,
   unshareQuiz,
   getQuizShares,
   getSharedWithMe,
   getMySharedQuizzes,
-  shareWithMultiple,
+  shareWithMultipleFriends,
 } from "../controllers/quizShareController";
 import { authMiddleware } from "../middleware/authMiddleware";
 
@@ -13,16 +14,19 @@ const quizShareRoute = new Hono();
 
 quizShareRoute.use("*", authMiddleware);
 
+// Get shared quizzes
 quizShareRoute.get("/shared-with-me", getSharedWithMe);
-
 quizShareRoute.get("/my-shared-quizzes", getMySharedQuizzes);
-
 quizShareRoute.get("/:quizId/shares", getQuizShares);
 
-quizShareRoute.post("/", shareQuiz);
+// Update visibility
+quizShareRoute.put("/visibility", updateQuizVisibility);
 
-quizShareRoute.post("/multiple", shareWithMultiple);
+// Share with specific friends (SPECIFIC visibility only)
+quizShareRoute.post("/", shareQuizWithFriend);
+quizShareRoute.post("/multiple", shareWithMultipleFriends);
 
+// Unshare
 quizShareRoute.delete("/:id", unshareQuiz);
 
 export default quizShareRoute;

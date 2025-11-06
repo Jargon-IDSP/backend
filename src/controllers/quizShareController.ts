@@ -1,7 +1,61 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
 
-export const shareQuiz = async (c: Context) => {
+/**
+ * Update quiz visibility
+ * Sets the quiz to PRIVATE, FRIENDS, PUBLIC, or SPECIFIC
+ */
+export const updateQuizVisibility = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+    const { customQuizId, visibility } = await c.req.json();
+
+    if (!customQuizId || !visibility) {
+      return c.json({ success: false, error: "Missing customQuizId or visibility" }, 400);
+    }
+
+    const validVisibility = ["PRIVATE", "FRIENDS", "PUBLIC", "SPECIFIC"];
+    if (!validVisibility.includes(visibility)) {
+      return c.json({ success: false, error: "Invalid visibility value" }, 400);
+    }
+
+    const quiz = await prisma.customQuiz.findUnique({
+      where: { id: customQuizId },
+    });
+
+    if (!quiz) {
+      return c.json({ success: false, error: "Quiz not found" }, 404);
+    }
+
+    if (quiz.userId !== userId) {
+      return c.json({ success: false, error: "You can only update your own quizzes" }, 403);
+    }
+
+    const updatedQuiz = await prisma.customQuiz.update({
+      where: { id: customQuizId },
+      data: { visibility },
+    });
+
+    // If changing away from SPECIFIC, optionally clear specific shares
+    if (visibility !== "SPECIFIC" && quiz.visibility === "SPECIFIC") {
+      await prisma.customQuizShare.deleteMany({
+        where: { customQuizId },
+      });
+    }
+
+    return c.json({ success: true, data: updatedQuiz });
+  } catch (error) {
+    console.error("Error updating quiz visibility:", error);
+    return c.json({ success: false, error: "Failed to update quiz visibility" }, 500);
+  }
+};
+
+/**
+ * Share quiz with specific friend (SPECIFIC visibility mode)
+ * Only works if quiz visibility is set to SPECIFIC
+ */
+export const shareQuizWithFriend = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
@@ -23,21 +77,37 @@ export const shareQuiz = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    const friendship = await prisma.friendship.findFirst({
+    if (quiz.visibility !== "SPECIFIC") {
+      return c.json({
+        success: false,
+        error: "Quiz must have SPECIFIC visibility to share with individual friends"
+      }, 400);
+    }
+
+    // Check if they're friends (mutual follow)
+    const yourFollow = await prisma.follow.findUnique({
       where: {
-        AND: [
-          {
-            OR: [
-              { requesterId: userId, addresseeId: friendUserId },
-              { requesterId: friendUserId, addresseeId: userId },
-            ],
-          },
-          { status: "ACCEPTED" },
-        ],
+        followerId_followingId: {
+          followerId: userId,
+          followingId: friendUserId,
+        },
       },
     });
 
-    if (!friendship) {
+    const theirFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: friendUserId,
+          followingId: userId,
+        },
+      },
+    });
+
+    const areFriends =
+      yourFollow?.status === "FOLLOWING" &&
+      theirFollow?.status === "FOLLOWING";
+
+    if (!areFriends) {
       return c.json({ success: false, error: "You can only share quizzes with friends" }, 403);
     }
 
@@ -60,18 +130,6 @@ export const shareQuiz = async (c: Context) => {
         sharedWithUserId: friendUserId,
       },
       include: {
-        customQuiz: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
         sharedWith: {
           select: {
             id: true,
@@ -90,6 +148,9 @@ export const shareQuiz = async (c: Context) => {
   }
 };
 
+/**
+ * Unshare quiz from specific friend
+ */
 export const unshareQuiz = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -122,6 +183,9 @@ export const unshareQuiz = async (c: Context) => {
   }
 };
 
+/**
+ * Get all specific shares for a quiz
+ */
 export const getQuizShares = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -158,49 +222,127 @@ export const getQuizShares = async (c: Context) => {
       },
     });
 
-    return c.json({ success: true, data: shares });
+    return c.json({
+      success: true,
+      data: {
+        visibility: quiz.visibility,
+        shares,
+      }
+    });
   } catch (error) {
     console.error("Error fetching quiz shares:", error);
     return c.json({ success: false, error: "Failed to fetch quiz shares" }, 500);
   }
 };
 
+/**
+ * Get quizzes shared with me
+ * Includes: PUBLIC quizzes, FRIENDS quizzes from friends, SPECIFIC quizzes shared with me
+ */
 export const getSharedWithMe = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
 
-    const shares = await prisma.customQuizShare.findMany({
-      where: { sharedWithUserId: userId },
-      include: {
-        customQuiz: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                firstName: true,
-                lastName: true,
+    // Get my friends (mutual follows)
+    const myFollowing = await prisma.follow.findMany({
+      where: {
+        followerId: userId,
+        status: "FOLLOWING",
+      },
+      select: { followingId: true },
+    });
+
+    const followingIds = myFollowing.map((f) => f.followingId);
+
+    const theirFollows = await prisma.follow.findMany({
+      where: {
+        followerId: { in: followingIds },
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+      select: { followerId: true },
+    });
+
+    const friendIds = theirFollows.map((f) => f.followerId);
+
+    // Get quizzes:
+    // 1. PUBLIC quizzes (not mine)
+    // 2. FRIENDS quizzes from my friends
+    // 3. SPECIFIC quizzes explicitly shared with me
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: { not: userId },
+        OR: [
+          { visibility: "PUBLIC" },
+          {
+            visibility: "FRIENDS",
+            userId: { in: friendIds },
+          },
+          {
+            visibility: "SPECIFIC",
+            sharedWith: {
+              some: {
+                sharedWithUserId: userId,
               },
             },
-            _count: {
-              select: { questions: true },
-            },
           },
+        ],
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            userId: true,
+            isDefault: true,
+          },
+        },
+        _count: {
+          select: { questions: true },
         },
       },
       orderBy: {
-        sharedAt: "desc",
+        createdAt: "desc",
       },
     });
 
-    return c.json({ success: true, data: shares });
+    // Map custom categories to general (id: 6) for non-owners
+    const mappedQuizzes = quizzes.map((quiz) => {
+      // If the quiz has a custom category (userId is set), map it to general for viewers
+      if (quiz.category.userId !== null && quiz.category.userId !== userId) {
+        return {
+          ...quiz,
+          categoryId: 6, // General category
+          category: {
+            id: 6,
+            name: "General",
+            userId: null,
+            isDefault: true,
+          },
+        };
+      }
+      return quiz;
+    });
+
+    return c.json({ success: true, data: mappedQuizzes });
   } catch (error) {
     console.error("Error fetching shared quizzes:", error);
     return c.json({ success: false, error: "Failed to fetch shared quizzes" }, 500);
   }
 };
 
+/**
+ * Get my quizzes with share info
+ */
 export const getMySharedQuizzes = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -222,7 +364,7 @@ export const getMySharedQuizzes = async (c: Context) => {
           },
         },
         _count: {
-          select: { 
+          select: {
             questions: true,
             sharedWith: true,
           },
@@ -235,12 +377,15 @@ export const getMySharedQuizzes = async (c: Context) => {
 
     return c.json({ success: true, data: quizzes });
   } catch (error) {
-    console.error("Error fetching my shared quizzes:", error);
+    console.error("Error fetching my quizzes:", error);
     return c.json({ success: false, error: "Failed to fetch quizzes" }, 500);
   }
 };
 
-export const shareWithMultiple = async (c: Context) => {
+/**
+ * Share with multiple specific friends
+ */
+export const shareWithMultipleFriends = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
@@ -262,32 +407,42 @@ export const shareWithMultiple = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    const friendships = await prisma.friendship.findMany({
+    if (quiz.visibility !== "SPECIFIC") {
+      return c.json({
+        success: false,
+        error: "Quiz must have SPECIFIC visibility to share with individual friends"
+      }, 400);
+    }
+
+    // Get mutual friends
+    const myFollowing = await prisma.follow.findMany({
       where: {
-        AND: [
-          {
-            OR: [
-              { requesterId: userId, addresseeId: { in: friendUserIds } },
-              { requesterId: { in: friendUserIds }, addresseeId: userId },
-            ],
-          },
-          { status: "ACCEPTED" },
-        ],
+        followerId: userId,
+        followingId: { in: friendUserIds },
+        status: "FOLLOWING",
       },
+      select: { followingId: true },
     });
 
-    const friendIds = friendships.map((f) =>
-      f.requesterId === userId ? f.addresseeId : f.requesterId
-    );
+    const followingIds = myFollowing.map((f) => f.followingId);
 
-    const validFriendIds = friendUserIds.filter((id) => friendIds.includes(id));
+    const theirFollows = await prisma.follow.findMany({
+      where: {
+        followerId: { in: followingIds },
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+      select: { followerId: true },
+    });
 
-    if (validFriendIds.length === 0) {
+    const mutualFriendIds = theirFollows.map((f) => f.followerId);
+
+    if (mutualFriendIds.length === 0) {
       return c.json({ success: false, error: "None of the specified users are your friends" }, 400);
     }
 
     const shares = await Promise.all(
-      validFriendIds.map(async (friendId) => {
+      mutualFriendIds.map(async (friendId) => {
         try {
           return await prisma.customQuizShare.create({
             data: {
@@ -297,7 +452,7 @@ export const shareWithMultiple = async (c: Context) => {
           });
         } catch (error: any) {
           if (error.code === "P2002") {
-            return null;
+            return null; // Already shared
           }
           throw error;
         }
@@ -310,7 +465,7 @@ export const shareWithMultiple = async (c: Context) => {
       success: true,
       data: {
         totalShared: successfulShares.length,
-        skipped: validFriendIds.length - successfulShares.length,
+        skipped: mutualFriendIds.length - successfulShares.length,
         shares: successfulShares,
       },
     });
@@ -319,3 +474,165 @@ export const shareWithMultiple = async (c: Context) => {
     return c.json({ success: false, error: "Failed to share quiz" }, 500);
   }
 };
+
+/**
+ * Get quizzes from a specific user
+ * Shows PUBLIC quizzes and FRIENDS quizzes if they're friends
+ */
+export const getUserSharedQuizzes = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const targetUserId = c.req.param("userId");
+
+    if (!targetUserId) {
+      return c.json({ success: false, error: "Missing userId parameter" }, 400);
+    }
+
+    // Check if they're friends (mutual follow)
+    const yourFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: currentUserId,
+          followingId: targetUserId,
+        },
+      },
+    });
+
+    const theirFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: targetUserId,
+          followingId: currentUserId,
+        },
+      },
+    });
+
+    const areFriends =
+      yourFollow?.status === "FOLLOWING" &&
+      theirFollow?.status === "FOLLOWING";
+
+    // Build query conditions based on friendship status
+    const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+
+    if (areFriends) {
+      visibilityConditions.push({ visibility: "FRIENDS" });
+    }
+
+    // Get quizzes from the target user
+    const quizzes = await prisma.customQuiz.findMany({
+      where: {
+        userId: targetUserId,
+        OR: visibilityConditions,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            userId: true,
+            isDefault: true,
+          },
+        },
+        _count: {
+          select: { questions: true },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Map custom categories to general (id: 6) for non-owners
+    const mappedQuizzes = quizzes.map((quiz) => {
+      // If the quiz has a custom category (userId is set), map it to general for viewers
+      if (quiz.category.userId !== null && quiz.category.userId !== currentUserId) {
+        return {
+          ...quiz,
+          categoryId: 6, // General category
+          category: {
+            id: 6,
+            name: "General",
+            userId: null,
+            isDefault: true,
+          },
+        };
+      }
+      return quiz;
+    });
+
+    return c.json({ success: true, data: mappedQuizzes });
+  } catch (error) {
+    console.error("Error fetching user quizzes:", error);
+    return c.json({ success: false, error: "Failed to fetch user quizzes" }, 500);
+  }
+};
+
+/**
+ * Check if user can access a quiz
+ * Helper function used by quiz controller
+ */
+export async function canAccessQuiz(userId: string, quiz: any): Promise<boolean> {
+  // Owner can always access
+  if (quiz.userId === userId) {
+    return true;
+  }
+
+  // Check based on visibility
+  switch (quiz.visibility) {
+    case "PUBLIC":
+      return true;
+
+    case "FRIENDS": {
+      // Check if we're friends (mutual follow)
+      const yourFollow = await prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: userId,
+            followingId: quiz.userId,
+          },
+        },
+      });
+
+      const theirFollow = await prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: quiz.userId,
+            followingId: userId,
+          },
+        },
+      });
+
+      return (
+        yourFollow?.status === "FOLLOWING" &&
+        theirFollow?.status === "FOLLOWING"
+      );
+    }
+
+    case "SPECIFIC": {
+      // Check if specifically shared with this user
+      const share = await prisma.customQuizShare.findUnique({
+        where: {
+          customQuizId_sharedWithUserId: {
+            customQuizId: quiz.id,
+            sharedWithUserId: userId,
+          },
+        },
+      });
+
+      return !!share;
+    }
+
+    case "PRIVATE":
+    default:
+      return false;
+  }
+}

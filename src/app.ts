@@ -9,9 +9,11 @@ import { leaderboardRoute } from "./routes/leaderboardRoute";
 import { learningRoute } from "./routes/learningRoute";
 import { ocrRoute } from "./routes/ocrRoute";
 import quizRoute from "./routes/quizRoute";
+import prebuiltQuizRoute from "./routes/prebuiltQuizRoute";
 import friendshipRoute from "./routes/friendshipRoute";
 import quizShareRoute from "./routes/quizShareRoute";
 import weeklyStatsRoute from "./routes/weeklyStatsRoute";
+import categoryRoute from "./routes/categoryRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
@@ -75,9 +77,11 @@ app.route("/leaderboard", leaderboardRoute);
 app.route("/learning", learningRoute);
 app.route("/ocr", ocrRoute);
 app.route("/quiz", quizRoute);
+app.route("/prebuilt-quizzes", prebuiltQuizRoute);
 app.route("/friendships", friendshipRoute);
 app.route("/quiz-shares", quizShareRoute);
 app.route("/weekly-tracking", weeklyStatsRoute);
+app.route("/categories", categoryRoute);
 
 // 404 handler
 app.notFound((c) => c.json({ error: "Not Found" }, 404));

@@ -1,5 +1,10 @@
 import { execSync } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function resetAndSeed() {
   console.log('🔥 Starting database reset and seed process...\n');
@@ -33,6 +38,22 @@ async function resetAndSeed() {
       stdio: 'inherit',
     });
     console.log('✅ Questions seeded\n');
+
+    // 4.5 Seed prebuilt quizzes
+    console.log('🎯 Seeding prebuilt quizzes...');
+    execSync('npx tsx src/seeds/prebuiltQuizSeeder.ts', {
+      cwd: path.join(__dirname, '../..'),
+      stdio: 'inherit',
+    });
+    console.log('✅ Prebuilt quizzes seeded\n');
+
+    // 4.6 Seed badges
+    console.log('🏅 Seeding badges...');
+    execSync('npx tsx src/seeds/badgeSeeder.ts', {
+      cwd: path.join(__dirname, '../..'),
+      stdio: 'inherit',
+    });
+    console.log('✅ Badges seeded\n');
 
     // 5. Migrate users from Clerk
     console.log('👥 Migrating users from Clerk...');
