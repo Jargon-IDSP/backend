@@ -45,7 +45,6 @@ model Category {
   customFlashcards CustomFlashcard[]
   customQuestions  CustomQuestion[]
   customQuizzes    CustomQuiz[]
-  documents        Document[]
 
   @@unique([name, userId])  // Name must be unique per user, or unique for defaults (userId = null)
   @@index([userId])
@@ -494,23 +493,6 @@ model UserWeeklyStats {
 }
 
 model User {
-<<<<<<< HEAD
-  id        String   @id
-  email     String
-  firstName String?
-  lastName  String?
-  username  String?
-  language  String   @default("english")
-  industryId Int?
-  onboardingCompleted Boolean @default(false)
-  introductionViewed Boolean @default(false)
-  score     Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  avatar               UserAvatar?
-  documents            Document[]
-=======
   id                   String                @id
   email                String
   firstName            String?
@@ -519,20 +501,18 @@ model User {
   language             String                @default("english")
   industryId           Int?
   onboardingCompleted  Boolean               @default(false)
+  introductionViewed   Boolean               @default(false)
   score                Int                   @default(0)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
->>>>>>> d0ea7715d2c234637e7828a0c4be3abe45c71460
+
+  avatar               UserAvatar?
+  documents            Document[]
   customFlashcards     CustomFlashcard[]
   customQuestions      CustomQuestion[]
   customQuizzes        CustomQuiz[]
   quizAttempts         UserQuizAttempt[]
   documentTranslations DocumentTranslation[]
-  documents            Document[]
-  friendshipsReceived  Friendship[]          @relation("FriendshipAddressee")
-  friendshipsInitiated Friendship[]          @relation("FriendshipRequester")
-  avatar               UserAvatar?
-  quizAttempts         UserQuizAttempt[]
   weeklyStats          UserWeeklyStats[]
   badges               UserBadge[]
   apprenticeshipProgress UserApprenticeshipProgress[]
@@ -543,8 +523,8 @@ model User {
   following Follow[] @relation("UserFollowing")
   followers Follow[] @relation("UserFollowers")
 
-  sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes") 
-  
+  sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")
+
   @@index([email])
   @@index([score])
   @@index([industryId])
