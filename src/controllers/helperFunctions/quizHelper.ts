@@ -2,6 +2,7 @@ import { prisma } from "../../lib/prisma";
 import type { UserQuizAttempt, UserQuizAnswer } from "../../interfaces/quizData";
 import { addWeeklyScore } from "./weeklyTrackingHelper";
 import { enrichQuestionWithChoices } from "./questionHelper";
+import { canAccessQuiz } from "../quizShareController";
 import {
   normalizeLanguage,
   transformQuestion,
@@ -30,21 +31,11 @@ export async function startQuizAttempt(
 
   if (!quiz) throw new Error("Quiz not found");
 
-  const isOwner = quiz.userId === userId;
-  
-  if (!isOwner) {
-    const isShared = await prisma.customQuizShare.findUnique({
-      where: {
-        customQuizId_sharedWithUserId: {
-          customQuizId,
-          sharedWithUserId: userId,
-        },
-      },
-    });
-    
-    if (!isShared) {
-      throw new Error("Unauthorized: You don't have access to this quiz");
-    }
+  // Check access using new visibility system
+  const hasAccess = await canAccessQuiz(userId, quiz);
+
+  if (!hasAccess) {
+    throw new Error("Unauthorized: You don't have access to this quiz");
   }
 
   const totalQuestions = quiz._count.questions;
@@ -385,21 +376,10 @@ export async function getQuizWithLanguage(quizId: string, userLanguage: string =
   if (!quiz) return null;
 
   if (userId) {
-    const isOwner = quiz.userId === userId;
-    
-    if (!isOwner) {
-      const isShared = await prisma.customQuizShare.findUnique({
-        where: {
-          customQuizId_sharedWithUserId: {
-            customQuizId: quizId,
-            sharedWithUserId: userId,
-          },
-        },
-      });
-      
-      if (!isShared) {
-        return null; 
-      }
+    const hasAccess = await canAccessQuiz(userId, quiz);
+
+    if (!hasAccess) {
+      return null;
     }
   }
 
@@ -499,21 +479,10 @@ export async function getQuizAllLanguages(quizId: string, userId?: string) {
   if (!quiz) return null;
 
   if (userId) {
-    const isOwner = quiz.userId === userId;
-    
-    if (!isOwner) {
-      const isShared = await prisma.customQuizShare.findUnique({
-        where: {
-          customQuizId_sharedWithUserId: {
-            customQuizId: quizId,
-            sharedWithUserId: userId,
-          },
-        },
-      });
-      
-      if (!isShared) {
-        return null; 
-      }
+    const hasAccess = await canAccessQuiz(userId, quiz);
+
+    if (!hasAccess) {
+      return null;
     }
   }
 

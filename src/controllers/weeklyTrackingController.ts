@@ -365,27 +365,33 @@ export async function getStatistics(c: Context) {
 export async function getFriendsWeeklyStats(c: Context) {
   try {
     const userId = c.get('userId');
-    
+
     if (!userId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const friendships = await prisma.friendship.findMany({
+    // Get users I'm following
+    const myFollowing = await prisma.follow.findMany({
       where: {
-        OR: [
-          { requesterId: userId, status: 'ACCEPTED' },
-          { addresseeId: userId, status: 'ACCEPTED' },
-        ],
+        followerId: userId,
+        status: 'FOLLOWING',
       },
-      select: {
-        requesterId: true,
-        addresseeId: true,
-      },
+      select: { followingId: true },
     });
 
-    const friendIds = friendships.map(f => 
-      f.requesterId === userId ? f.addresseeId : f.requesterId
-    );
+    const followingIds = myFollowing.map((f) => f.followingId);
+
+    // Get which of those users are also following me back (mutual = friends)
+    const mutualFollows = await prisma.follow.findMany({
+      where: {
+        followerId: { in: followingIds },
+        followingId: userId,
+        status: 'FOLLOWING',
+      },
+      select: { followerId: true },
+    });
+
+    const friendIds = mutualFollows.map((f) => f.followerId);
 
     const userIds = [userId, ...friendIds];
     const stats = await getWeeklyStatsForUsers(userIds);
