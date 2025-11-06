@@ -713,12 +713,9 @@ export const getDocument = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const cacheKey = `document:${id}`;
+    const cacheKey = `document:${id}:${user.id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      if (cached.document.userId !== user.id) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
       return c.json(cached);
     }
 
@@ -730,8 +727,23 @@ export const getDocument = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    if (document.userId !== user.id) {
-      return c.json({ error: "Forbidden" }, 403);
+    // Check if user is owner or has access via quiz share
+    const isOwner = document.userId === user.id;
+
+    if (!isOwner) {
+      // Check if any quiz from this document has been shared with this user
+      const sharedQuiz = await prisma.customQuizShare.findFirst({
+        where: {
+          sharedWithUserId: user.id,
+          customQuiz: {
+            documentId: id,
+          },
+        },
+      });
+
+      if (!sharedQuiz) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
     }
 
     const response = { document };
@@ -762,8 +774,23 @@ export const getDownloadUrl = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    if (document.userId !== user.id) {
-      return c.json({ error: "Forbidden" }, 403);
+    // Check if user is owner or has access via quiz share
+    const isOwner = document.userId === user.id;
+
+    if (!isOwner) {
+      // Check if any quiz from this document has been shared with this user
+      const sharedQuiz = await prisma.customQuizShare.findFirst({
+        where: {
+          sharedWithUserId: user.id,
+          customQuiz: {
+            documentId: id,
+          },
+        },
+      });
+
+      if (!sharedQuiz) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
     }
 
     const command = new GetObjectCommand({
@@ -838,16 +865,11 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const cacheKey = `document:status:${id}`;
+    const cacheKey = `document:status:${id}:${user.id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      console.log(`✅ Cache HIT: ${cacheKey}`);
-      if (cached.document.userId !== user.id) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
       return c.json(cached);
     }
-    console.log(`❌ Cache MISS: ${cacheKey}`);
 
     const document = await prisma.document.findUnique({
       where: { id },
@@ -866,8 +888,23 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    if (document.userId !== user.id) {
-      return c.json({ error: "Forbidden" }, 403);
+    // Check if user is owner or has access via quiz share
+    const isOwner = document.userId === user.id;
+
+    if (!isOwner) {
+      // Check if any quiz from this document has been shared with this user
+      const sharedQuiz = await prisma.customQuizShare.findFirst({
+        where: {
+          sharedWithUserId: user.id,
+          customQuiz: {
+            documentId: id,
+          },
+        },
+      });
+
+      if (!sharedQuiz) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
     }
 
     const quickCacheKey = `flashcards:quick:${id}`;
@@ -963,8 +1000,23 @@ export const getDocumentTranslation = async (c: Context) => {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      if (document.userId !== user.id) {
-        return c.json({ error: "Forbidden" }, 403);
+      // Check if user is owner or has access via quiz share
+      const isOwner = document.userId === user.id;
+
+      if (!isOwner) {
+        // Check if any quiz from this document has been shared with this user
+        const sharedQuiz = await prisma.customQuizShare.findFirst({
+          where: {
+            sharedWithUserId: user.id,
+            customQuiz: {
+              documentId: id,
+            },
+          },
+        });
+
+        if (!sharedQuiz) {
+          return c.json({ error: "Forbidden" }, 403);
+        }
       }
 
       // Return in same format as DB translation
@@ -997,12 +1049,9 @@ export const getDocumentTranslation = async (c: Context) => {
     }
 
     // Check regular cache
-    const cacheKey = `document:translation:${id}`;
+    const cacheKey = `document:translation:${id}:${user.id}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
-      if (cached.translation?.document?.userId !== user.id) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
       return c.json(cached);
     }
 
@@ -1031,8 +1080,23 @@ export const getDocumentTranslation = async (c: Context) => {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      if (document.userId !== user.id) {
-        return c.json({ error: "Forbidden" }, 403);
+      // Check if user is owner or has access via quiz share
+      const isOwner = document.userId === user.id;
+
+      if (!isOwner) {
+        // Check if any quiz from this document has been shared with this user
+        const sharedQuiz = await prisma.customQuizShare.findFirst({
+          where: {
+            sharedWithUserId: user.id,
+            customQuiz: {
+              documentId: id,
+            },
+          },
+        });
+
+        if (!sharedQuiz) {
+          return c.json({ error: "Forbidden" }, 403);
+        }
       }
 
       return c.json({
@@ -1042,8 +1106,23 @@ export const getDocumentTranslation = async (c: Context) => {
       });
     }
 
-    if (translation.document.userId !== user.id) {
-      return c.json({ error: "Forbidden" }, 403);
+    // Check if user is owner or has access via quiz share
+    const isOwner = translation.document.userId === user.id;
+
+    if (!isOwner) {
+      // Check if any quiz from this document has been shared with this user
+      const sharedQuiz = await prisma.customQuizShare.findFirst({
+        where: {
+          sharedWithUserId: user.id,
+          customQuiz: {
+            documentId: id,
+          },
+        },
+      });
+
+      if (!sharedQuiz) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
     }
 
     const response = { translation };
