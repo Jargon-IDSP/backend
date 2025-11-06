@@ -191,6 +191,7 @@ export const getFriends = async (c: Context) => {
       const friend = friendship.requesterId === userId ? friendship.addressee : friendship.requester;
       return {
         friendshipId: friendship.id,
+        status: friendship.status,
         ...friend,
       };
     });
@@ -336,11 +337,15 @@ export const searchUsers = async (c: Context) => {
 
       let friendshipStatus = "none";
       let friendshipId = null;
+      let status = null;
 
       if (friendship) {
         friendshipId = friendship.id;
+        status = friendship.status;
         if (friendship.status === "ACCEPTED") {
           friendshipStatus = "friends";
+        } else if (friendship.status === "BLOCKED") {
+          friendshipStatus = "blocked";
         } else if (friendship.requesterId === userId) {
           friendshipStatus = "pending_sent";
         } else {
@@ -352,6 +357,7 @@ export const searchUsers = async (c: Context) => {
         ...user,
         friendshipStatus,
         friendshipId,
+        status,
       };
     });
 

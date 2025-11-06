@@ -319,3 +319,50 @@ export const shareWithMultiple = async (c: Context) => {
     return c.json({ success: false, error: "Failed to share quiz" }, 500);
   }
 };
+
+export const getUserSharedQuizzes = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const targetUserId = c.req.param("userId");
+
+    // Get quizzes that the target user has shared with the current user
+    const shares = await prisma.customQuizShare.findMany({
+      where: {
+        sharedWithUserId: currentUserId,
+        customQuiz: {
+          userId: targetUserId,
+        },
+      },
+      include: {
+        customQuiz: {
+          include: {
+            category: true,
+            _count: {
+              select: { questions: true },
+            },
+          },
+        },
+      },
+      orderBy: {
+        sharedAt: "desc",
+      },
+    });
+
+    // Transform the data to match the expected format
+    const quizzes = shares.map((share) => ({
+      id: share.customQuiz.id,
+      name: share.customQuiz.name,
+      category: share.customQuiz.category.name,
+      createdAt: share.customQuiz.createdAt,
+      _count: {
+        questions: share.customQuiz._count.questions,
+      },
+    }));
+
+    return c.json({ success: true, data: quizzes });
+  } catch (error) {
+    console.error("Error fetching user shared quizzes:", error);
+    return c.json({ success: false, error: "Failed to fetch quizzes" }, 500);
+  }
+};
