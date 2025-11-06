@@ -55,6 +55,7 @@ import {
   getSharedWithMe,
   getMySharedQuizzes,
   shareWithMultiple,
+  getUserSharedQuizzes,
 } from "../controllers/quizShareController";
 
 export const learningRoute = new Hono();
@@ -124,7 +125,8 @@ const sharingRoutes = new Hono()
 
   .get("/quiz/:quizId/shares", getQuizShares)
   .get("/shared-with-me", getSharedWithMe)
-  .get("/my-shared", getMySharedQuizzes);
+  .get("/my-shared", getMySharedQuizzes)
+  .get("/user/:userId/quizzes", getUserSharedQuizzes);
 
 learningRoute.route("/existing", existingRoutes);
 learningRoute.route("/custom", customRoutes);
