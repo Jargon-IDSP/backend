@@ -107,6 +107,22 @@ friendshipRoute.post("/", async (c: Context) => {
       },
     });
 
+    // Create notification for the user being followed
+    try {
+      const { createNotification } = await import("../services/notificationService");
+      await createNotification({
+        userId: followingId, // Notify the person being followed
+        type: "FRIEND_REQUEST",
+        title: "New Friend Request",
+        message: `${user.firstName || user.username || "Someone"} followed you!`,
+        actionUrl: `/profile/friends/${userId}`,
+        followId: follow.id,
+      });
+    } catch (notifError) {
+      console.error("Failed to create follow notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
+
     return c.json({ success: true, data: follow });
   } catch (error) {
     console.error("Error following user:", error);

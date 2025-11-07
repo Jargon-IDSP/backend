@@ -57,12 +57,24 @@ async function migrateUsersFromClerk() {
         });
 
         if (existingUser) {
-          console.log(`User ${clerkUser.id} already exists`);
+          // Update existing user while preserving score and language
+          await prisma.user.update({
+            where: { id: clerkUser.id },
+            data: {
+              email: primaryEmail,
+              firstName: clerkUser.firstName || existingUser.firstName,
+              lastName: clerkUser.lastName || existingUser.lastName,
+              username: clerkUser.username || existingUser.username,
+              // Preserve score and language - don't update them
+              updatedAt: new Date(clerkUser.updatedAt),
+            },
+          });
+          console.log(`Updated user (preserved score: ${existingUser.score}, language: ${existingUser.language}): ${primaryEmail}`);
           skippedCount++;
           continue;
         }
 
-        // Generate random score between 0 and 5000
+        // Generate random score between 0 and 5000 for new users
         const randomScore = Math.floor(Math.random() * 5001);
 
         await prisma.user.create({
@@ -78,7 +90,7 @@ async function migrateUsersFromClerk() {
           },
         });
 
-        console.log(`Migrated user: ${primaryEmail} (${clerkUser.id})`);
+        console.log(`Migrated new user: ${primaryEmail} (${clerkUser.id}) with score: ${randomScore}`);
         migratedCount++;
 
       } catch (error) {

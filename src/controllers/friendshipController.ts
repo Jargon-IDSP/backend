@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../services/notificationService";
 
 /**
  * Follow a user
@@ -64,6 +65,21 @@ export const followUser = async (c: Context) => {
         status: "FOLLOWING",
       },
     });
+
+    // Create notification for the user being followed
+    try {
+      await createNotification({
+        userId: followingId, // Notify the person being followed
+        type: "FRIEND_REQUEST",
+        title: "New Friend Request",
+        message: `${user.firstName || user.username || "Someone"} followed you!`,
+        actionUrl: `/profile/friends/${userId}`,
+        followId: follow.id,
+      });
+    } catch (notifError) {
+      console.error("Failed to create follow notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
 
     return c.json({ success: true, data: follow });
   } catch (error) {

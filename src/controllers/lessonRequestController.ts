@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../services/notificationService";
 
 /**
  * Create a lesson request
@@ -162,6 +163,21 @@ export const acceptLessonRequest = async (c: Context) => {
       where: { id: request.id },
       data: { status: "ACCEPTED", updatedAt: new Date() },
     });
+
+    // Create notification for the requester
+    try {
+      await createNotification({
+        userId: requesterId, // Notify the person who requested access
+        type: "LESSON_APPROVED",
+        title: "Lesson Access Granted!",
+        message: `${user.firstName || user.username || "Someone"} has granted you access to their lessons.`,
+        actionUrl: `/profile/${userId}`,
+        lessonRequestId: request.id,
+      });
+    } catch (notifError) {
+      console.error("Failed to create lesson approval notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
 
     return c.json({ success: true, data: updated });
   } catch (error) {
