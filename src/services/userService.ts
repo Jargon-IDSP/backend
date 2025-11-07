@@ -1,5 +1,6 @@
 // src/services/userService.ts
 import redisClient from "../lib/redis";
+import { prisma } from "../lib/prisma";
 
 export class UserService {
   private CACHE_TTL = 3600; // 1 hour
@@ -15,8 +16,28 @@ export class UserService {
         return JSON.parse(cached);
       }
 
-      // Cache miss - no database, so return null
+      // Cache miss - query database
       console.log("Cache miss for user:", userId);
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          score: true,
+          industryId: true,
+          createdAt: true,
+        },
+      });
+
+      if (user) {
+        // Cache the result
+        await redisClient.setEx(cacheKey, this.CACHE_TTL, JSON.stringify(user));
+        return user;
+      }
+
       return null;
     } catch (error) {
       console.error("Error fetching user:", error);

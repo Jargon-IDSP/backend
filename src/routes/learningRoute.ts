@@ -26,6 +26,7 @@ import {
   getCustomQuizzesByCategory,
   getCustomQuizCountByUser,
   getUserLessonNames,
+  getLessonDetails,
   getDocumentsByCategory,
   getCustomQuizById,
   getCustomQuizByDocument, // Added this new function
@@ -91,6 +92,7 @@ const customRoutes = new Hono()
   .get("/quizzes", getCustomQuizzesByUser)
   .get("/users/:userId/quizzes/count", getCustomQuizCountByUser)
   .get("/users/:userId/lessons", getUserLessonNames)
+  .get("/users/:userId/lessons/:lessonId", getLessonDetails)
 
   .get("/random/flashcard", getRandomCustomFlashcard)
   .get("/random/question", getRandomCustomQuestion)
