@@ -9,6 +9,7 @@ import { s3 } from "../lib/s3";
 import { prisma } from "../lib/prisma";
 import redisClient from "../lib/redis";
 import { canAccessQuiz } from "./quizShareController";
+import { createNotification } from "../services/notificationService";
 
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
@@ -449,6 +450,22 @@ async function generateFlashcardsFull(
       invalidateCachePattern(`categories:all:${userId}`),
     ]);
     console.log("✅ Cache invalidation complete");
+
+    // Create notification for document completion
+    try {
+      await createNotification({
+        userId,
+        type: "DOCUMENT_READY",
+        title: "Document Ready!",
+        message: `Your document "${document.filename}" has been processed and is ready to study.`,
+        actionUrl: `/learning/documents/${documentId}/study`,
+        documentId,
+      });
+      console.log("📬 Document completion notification created");
+    } catch (notifError) {
+      console.error("Failed to create notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
 
     console.log(`${"=".repeat(60)}`);
     console.log(`✨ FLASHCARD GENERATION COMPLETE FOR ${documentId}`);

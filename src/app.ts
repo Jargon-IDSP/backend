@@ -15,6 +15,7 @@ import quizShareRoute from "./routes/quizShareRoute";
 import weeklyStatsRoute from "./routes/weeklyStatsRoute";
 import categoryRoute from "./routes/categoryRoute";
 import lessonRequestRoute from "./routes/lessonRequestRoute";
+import { notificationRoute } from "./routes/notificationRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
@@ -34,18 +35,12 @@ app.use(
       "https://backend-84zo.onrender.com",
     ],
     credentials: true,
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// Connect to Redis on startup with error handling
-connectRedis()
-  .then(() => console.log("✅ Redis connected successfully"))
-  .catch((err) => {
-    console.error("❌ Redis connection failed:", err);
-    console.log("⚠️  App will continue without caching");
-  });
+// Redis connection is now handled in index.ts before server starts
 
 // Health check endpoint (useful for monitoring)
 app.get("/", (c) =>
@@ -83,6 +78,7 @@ app.route("/friendships", friendshipRoute);
 app.route("/quiz-shares", quizShareRoute);
 app.route("/weekly-tracking", weeklyStatsRoute);
 app.route("/categories", categoryRoute);
+app.route("/notifications", notificationRoute);
 app.route("/lesson-requests", lessonRequestRoute);
 
 // 404 handler
