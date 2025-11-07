@@ -10,6 +10,8 @@ export const getLeaderboard = async (c: Context) => {
         lastName: true,
         score: true,
         language: true,
+        email: true,
+        createdAt: true,
       },
       orderBy: {
         score: 'desc',
@@ -69,6 +71,8 @@ export const getFriendsLeaderboard = async (c: Context) => {
         lastName: true,
         score: true,
         language: true,
+        email: true,
+        createdAt: true,
       },
     });
 
@@ -81,6 +85,8 @@ export const getFriendsLeaderboard = async (c: Context) => {
         lastName: true,
         score: true,
         language: true,
+        email: true,
+        createdAt: true,
       },
     });
 
