@@ -7,6 +7,7 @@ import {
   getLessonRequests,
   checkLessonAccess,
   getLessonRequestStatus,
+  getLessonRequestById,
 } from "../controllers/lessonRequestController";
 import { authMiddleware } from "../middleware/authMiddleware";
 
@@ -34,6 +35,9 @@ lessonRequestRoute.get("/access/:userId", checkLessonAccess);
 
 // Get lesson request status between two users
 lessonRequestRoute.get("/status/:userId", getLessonRequestStatus);
+
+// Get lesson request by ID (for notifications) - must come after specific routes
+lessonRequestRoute.get("/:id", getLessonRequestById);
 
 export default lessonRequestRoute;
 
