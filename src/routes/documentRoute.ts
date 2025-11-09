@@ -11,6 +11,7 @@ import {
   getDocumentStatus,
   getDocumentTranslation,
   finalizeDocument,
+  getDocumentJobStatus,
 } from "../controllers/documentController";
 import { generateCustomForDocument } from "../controllers/customGenController";
 
@@ -20,6 +21,7 @@ export const documentRoute = new Hono()
   .get("/", getUserDocuments)
   .post("/", saveDocument)
   .get("/:id/status", getDocumentStatus)
+  .get("/:id/job-status", getDocumentJobStatus)
   .get("/:id/translation", getDocumentTranslation)
   .get("/:id/download", getDownloadUrl)
   .get("/:id", getDocument)

@@ -121,7 +121,16 @@ export const authMiddleware = async (c: Context, next: Next) => {
     await next();
 
   } catch (error) {
-    console.error("Auth middleware error:", error);
+    // Only log real errors, not expected "not logged in" scenarios
+    const isExpectedError = error instanceof Error && (
+      error.message.includes('Invalid JWT form') ||
+      error.message.includes('token-invalid')
+    );
+    
+    if (!isExpectedError) {
+      console.error("Auth middleware error:", error);
+    }
+    
     return c.json({ 
       error: `Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
     }, 401);
