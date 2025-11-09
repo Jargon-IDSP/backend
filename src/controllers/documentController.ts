@@ -10,6 +10,7 @@ import { prisma } from "../lib/prisma";
 import redisClient from "../lib/redis";
 import { canAccessQuiz } from "./quizShareController";
 import { createNotification } from "../services/notificationService";
+import { ocrQueue, flashcardQueue, jobOptions } from "../lib/queue";
 
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
@@ -36,7 +37,7 @@ const setCache = async <T>(
   }
 };
 
-const invalidateCachePattern = async (pattern: string): Promise<void> => {
+export const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
@@ -47,7 +48,7 @@ const invalidateCachePattern = async (pattern: string): Promise<void> => {
   }
 };
 
-async function extractTextWithOCR(
+export async function extractTextWithOCR(
   documentId: string,
   userId: string
 ): Promise<string | null> {
@@ -78,7 +79,7 @@ async function extractTextWithOCR(
   }
 }
 
-async function translateDocument(
+export async function translateDocument(
   documentId: string,
   userId: string,
   extractedText: string
@@ -106,30 +107,32 @@ async function translateDocument(
       userLanguage
     );
 
-    await redisClient.setEx(
-      `translation:quick:${documentId}`,
-      300, 
-      JSON.stringify({
-        language: userLanguage,
-        text: quickTranslation,
-        textEnglish: extractedText,
-      })
-    );
-    console.log(`✅ Quick translation cached for instant display!`);
-
-    console.log("🌐 Continuing with full translation to all languages...");
-    const translationData = await translateFullDocument(
-      extractedText,
-      documentId,
-      userId
-    );
+    // Cache quick translation and start full translation in parallel
+    const [_, translationData] = await Promise.all([
+      redisClient.setEx(
+        `translation:quick:${documentId}`,
+        300, 
+        JSON.stringify({
+          language: userLanguage,
+          text: quickTranslation,
+          textEnglish: extractedText,
+        })
+      ).then(() => {
+        console.log(`✅ Quick translation cached for instant display!`);
+      }),
+      // Start full translation immediately (doesn't need quick translation)
+      (async () => {
+        console.log("🌐 Starting full translation to all languages...");
+        return await translateFullDocument(extractedText, documentId, userId);
+      })(),
+    ]);
     console.log("✅ Translation data received, saving to database...");
     await prisma.documentTranslation.create({ data: translationData });
     console.log("✅ Translation complete and saved to database\n");
 
-    await redisClient.del(`translation:quick:${documentId}`);
-
+    // Parallelize cache cleanup and invalidation
     await Promise.all([
+      redisClient.del(`translation:quick:${documentId}`),
       invalidateCachePattern(`document:translation:${documentId}:*`),
       invalidateCachePattern(`document:status:${documentId}`),
     ]);
@@ -147,7 +150,7 @@ async function translateDocument(
   }
 }
 
-async function generateFlashcardsAndQuestionsOptimized(
+export async function generateFlashcardsAndQuestionsOptimized(
   documentId: string,
   userId: string,
   providedCategoryId?: number | null
@@ -157,19 +160,22 @@ async function generateFlashcardsAndQuestionsOptimized(
     console.log(`🎴 OPTIMIZED FLASHCARD GENERATION: ${documentId}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    const existingFlashcards = await prisma.customFlashcard.count({
-      where: { documentId },
-    });
+    // Parallelize user lookup and existing flashcard check
+    const [existingFlashcards, user] = await Promise.all([
+      prisma.customFlashcard.count({
+        where: { documentId },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { language: true },
+      }),
+    ]);
 
     if (existingFlashcards > 0) {
       console.log(`⚠️ Flashcards already exist for document ${documentId}, skipping generation`);
       return;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { language: true },
-    });
     const userLanguage = user?.language || 'english';
 
     console.log(`🎯 User's preferred language: ${userLanguage}`);
@@ -190,7 +196,108 @@ async function generateFlashcardsAndQuestionsOptimized(
   }
 }
 
-async function generateFlashcardsQuick(
+export async function generateFlashcardsOptimizedLanguages(
+  documentId: string,
+  userId: string,
+  userLanguage: string,
+  providedCategoryId?: number | null
+) {
+  try {
+    const { getExistingTerms, createQuizData, transformToFlashcardData, transformToQuestionData, createIndexToIdMap } = await import("./helperFunctions/documentHelper");
+    const { extractTermsAndQuestions, translateUserPreferredLanguageOnly, cleanAndDeduplicateTerms, filterAndFillQuestions, makeDedupSet, buildTermsOutput, buildQuestionsOutput } = await import("./helperFunctions/customFlashcardHelper");
+    const { GoogleGenAI } = await import("@google/genai");
+
+    if (!process.env.GOOGLE_GENAI_API_KEY) {
+      throw new Error("Missing GOOGLE_GENAI_API_KEY");
+    }
+
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { id: true, extractedText: true, filename: true, categoryId: true },
+    });
+
+    if (!document || !document.extractedText) {
+      throw new Error("No document or extracted text");
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+
+    // Get existing terms to avoid duplicates - parallelize these queries
+    const [allExistingTerms, termsFromThisDocument] = await Promise.all([
+      getExistingTerms(userId),
+      prisma.customFlashcard.findMany({
+        where: { documentId },
+        select: { termEnglish: true },
+      }),
+    ]);
+    const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
+    const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
+
+    console.log("📝 Step 1: Extracting terms and questions in English...");
+
+    const extraction = await extractTermsAndQuestions(ai, document.extractedText, existingDbTermsEnglish);
+    const dedup = makeDedupSet(existingDbTermsEnglish);
+    const top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
+
+    if (top10.length === 0) {
+      throw new Error("No usable terms after deduplication.");
+    }
+
+    const qEnglish = filterAndFillQuestions(extraction.questions, top10);
+    
+    console.log(`✅ Extracted ${top10.length} terms and ${qEnglish.length} questions`);
+
+    // Only translate to user's language (not all 6 languages!)
+    console.log(`🌐 Translating to ${userLanguage} only (skipping other 5 languages)...`);
+    const translated = await translateUserPreferredLanguageOnly(ai, top10, qEnglish, userLanguage);
+
+    console.log("✅ Translation complete");
+
+    // Determine category
+    let categoryId = providedCategoryId || document.categoryId;
+    if (!categoryId) {
+      const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+      categoryId = await categorizeDocument(document.extractedText);
+      console.log(`📂 Auto-categorized as: ${categoryId}`);
+    }
+
+    const termsOut = buildTermsOutput(top10, translated, documentId, userId);
+    const questionsOut = buildQuestionsOutput(qEnglish, translated, documentId, userId, top10);
+
+    const quizData = createQuizData(documentId, userId, document.filename, categoryId);
+    const flashcardData = transformToFlashcardData(termsOut, documentId, userId, categoryId);
+    const indexToIdMap = createIndexToIdMap(flashcardData);
+    const questionData = transformToQuestionData(questionsOut, indexToIdMap, quizData.id, userId, categoryId);
+
+    // Save to database
+    await prisma.$transaction([
+      prisma.document.update({
+        where: { id: documentId },
+        data: { categoryId, ocrProcessed: true }
+      }),
+      prisma.customQuiz.create({
+        data: { ...quizData, visibility: 'PRIVATE' }
+      }),
+      ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
+      ...questionData.map((data) => prisma.customQuestion.create({ data })),
+    ]);
+
+    console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database`);
+
+    // Invalidate caches
+    await Promise.all([
+      invalidateCachePattern(`custom:user:${userId}:*`),
+      invalidateCachePattern(`documents:user:${userId}`),
+      invalidateCachePattern(`documents:category:${userId}:${categoryId}`)
+    ]);
+
+  } catch (error) {
+    console.error(`❌ Optimized language flashcard generation failed:`, error);
+    throw error;
+  }
+}
+
+export async function generateFlashcardsQuick(
   documentId: string,
   userId: string,
   userLanguage: string,
@@ -228,11 +335,14 @@ async function generateFlashcardsQuick(
 
   const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
 
-  const allExistingTerms = await getExistingTerms(userId);
-  const termsFromThisDocument = await prisma.customFlashcard.findMany({
-    where: { documentId },
-    select: { termEnglish: true },
-  });
+  // Parallelize these database queries
+  const [allExistingTerms, termsFromThisDocument] = await Promise.all([
+    getExistingTerms(userId),
+    prisma.customFlashcard.findMany({
+      where: { documentId },
+      select: { termEnglish: true },
+    }),
+  ]);
   const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
   const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
 
@@ -289,7 +399,7 @@ async function generateFlashcardsQuick(
   console.log(`⚡ Quick flashcards cached: ${termsOut.length} terms, ${questionsOut.length} questions (English + ${userLanguage})`);
 }
 
-async function generateFlashcardsFull(
+export async function generateFlashcardsFull(
   documentId: string,
   userId: string,
   providedCategoryId?: number | null
@@ -354,11 +464,14 @@ async function generateFlashcardsFull(
       console.log("📝 Extracting terms and questions in English...");
       const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
 
-      const allExistingTerms = await getExistingTerms(userId);
-      const termsFromThisDocument = await prisma.customFlashcard.findMany({
-        where: { documentId },
-        select: { termEnglish: true },
-      });
+      // Parallelize these database queries
+      const [allExistingTerms, termsFromThisDocument] = await Promise.all([
+        getExistingTerms(userId),
+        prisma.customFlashcard.findMany({
+          where: { documentId },
+          select: { termEnglish: true },
+        }),
+      ]);
       const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
       const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
 
@@ -538,45 +651,45 @@ export const saveDocument = async (c: Context) => {
       },
     });
 
-    await invalidateCachePattern(`documents:user:${user.id}`);
+    // Parallelize cache invalidations
+    const cacheInvalidations = [
+      invalidateCachePattern(`documents:user:${user.id}`),
+    ];
     if (categoryId) {
-      await invalidateCachePattern(`documents:category:${user.id}:${categoryId}`);
+      cacheInvalidations.push(invalidateCachePattern(`documents:category:${user.id}:${categoryId}`));
     }
+    await Promise.all(cacheInvalidations);
 
     const ocrSupportedTypes = ["application/pdf", "image/jpeg", "image/png"];
     if (ocrSupportedTypes.includes(fileType)) {
-      console.log(`🚀 Starting background OCR extraction for ${filename}`);
+      console.log(`🚀 Queueing OCR job for ${filename}`);
 
-      setImmediate(() => {
-        extractTextWithOCR(document.id, user.id)
-          .then(async (extractedText) => {
-            if (!extractedText) {
-              console.log(`⚠️ No text extracted from ${document.id}`);
-              return;
-            }
+      try {
+        // Queue OCR job (which will handle translation internally)
+        await ocrQueue.add(
+          `ocr-${document.id}`,
+          {
+            documentId: document.id,
+            userId: user.id,
+            fileKey,
+            filename,
+            categoryId: categoryId || 6,
+          },
+          {
+            ...jobOptions,
+            jobId: `ocr-${document.id}`, // Prevent duplicate jobs
+          }
+        );
 
-            console.log(`✅ OCR completed for ${document.id}`);
+        // Don't queue flashcard job here - the OCR worker will queue it after translation completes
+        // This eliminates the 5-second delay and polling overhead
 
-            await invalidateCachePattern(`document:status:${document.id}`);
-
-            translateDocument(document.id, user.id, extractedText)
-              .catch((err: Error) => {
-                console.error(`❌ Translation error for ${document.id}:`, err);
-              });
-
-            return generateFlashcardsAndQuestionsOptimized(document.id, user.id, categoryId);
-          })
-          .then(async () => {
-            console.log(`✅ Flashcards and questions generated for ${document.id}`);
-            await invalidateCachePattern(`document:status:${document.id}`);
-          })
-          .catch((err: Error) => {
-            console.error(
-              `❌ Background processing error for ${document.id}:`,
-              err
-            );
-          });
-      });
+        console.log(`📤 Jobs queued for document ${document.id}`);
+      } catch (queueError) {
+        console.error(`❌ Failed to queue jobs for ${document.id}:`, queueError);
+        // Continue anyway - return success but log the error
+        // The old setImmediate fallback could be used here if needed
+      }
     }
 
     return c.json({
@@ -1179,6 +1292,83 @@ export const getDocumentTranslation = async (c: Context) => {
     return c.json(response);
   } catch (error) {
     console.error("Get document translation error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
+
+export const getDocumentJobStatus = async (c: Context) => {
+  try {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const document = await prisma.document.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    // Try to get job status, but handle Redis being unavailable
+    let ocrJob = null;
+    let translationJob = null;
+    let flashcardJob = null;
+
+    try {
+      const results = await Promise.allSettled([
+        ocrQueue.getJob(`ocr-${id}`),
+        (await import("../lib/queue")).translationQueue.getJob(`translate-${id}`),
+        flashcardQueue.getJob(`flashcards-${id}`),
+      ]);
+
+      if (results[0].status === 'fulfilled') ocrJob = results[0].value;
+      if (results[1].status === 'fulfilled') translationJob = results[1].value;
+      if (results[2].status === 'fulfilled') flashcardJob = results[2].value;
+    } catch (queueError) {
+      // Redis unavailable - return empty job status
+      console.warn('⚠️  Cannot fetch job status - Redis unavailable');
+      return c.json({
+        ocr: null,
+        translation: null,
+        flashcards: null,
+        redisUnavailable: true,
+      });
+    }
+
+    const getJobInfo = async (job: any) => {
+      if (!job) return null;
+      
+      try {
+        const state = await job.getState();
+        return {
+          id: job.id,
+          state,
+          progress: job.progress || 0,
+          failedReason: job.failedReason,
+          attemptsMade: job.attemptsMade,
+          timestamp: job.timestamp,
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    return c.json({
+      ocr: await getJobInfo(ocrJob),
+      translation: await getJobInfo(translationJob),
+      flashcards: await getJobInfo(flashcardJob),
+    });
+  } catch (error) {
+    console.error("Get job status error:", error);
     return c.json({ error: String(error) }, 500);
   }
 };

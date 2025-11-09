@@ -611,8 +611,11 @@ model LessonRequest {
 
 enum NotificationType {
   DOCUMENT_READY
+  DOCUMENT_ERROR
+  DOCUMENT_PROCESSING
   FRIEND_REQUEST
   LESSON_APPROVED
+  QUIZ_SHARED
 }
 
 model Notification {
