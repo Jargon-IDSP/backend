@@ -736,11 +736,12 @@ export const getDocument = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const cacheKey = `document:${id}:${user.id}`;
-    const cached = await getFromCache<any>(cacheKey);
-    if (cached) {
-      return c.json(cached);
-    }
+    // Don't cache document access checks - they can change when lesson requests are accepted
+    // const cacheKey = `document:${id}:${user.id}`;
+    // const cached = await getFromCache<any>(cacheKey);
+    // if (cached) {
+    //   return c.json(cached);
+    // }
 
     const document = await prisma.document.findUnique({
       where: { id },
@@ -754,28 +755,43 @@ export const getDocument = async (c: Context) => {
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
+      // Check if user has lesson request access (grants access to all documents from this user)
+      const lessonRequest = await prisma.lessonRequest.findUnique({
+        where: {
+          requesterId_recipientId: {
+            requesterId: user.id,
+            recipientId: document.userId,
+          },
+        },
       });
 
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
+      const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
 
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
+      if (!hasLessonAccess) {
+        // Get quizzes for this document
+        const quizzes = await prisma.customQuiz.findMany({
+          where: { documentId: id },
+        });
+
+        // Check if user can access any quiz from this document
+        let hasAccess = false;
+        for (const quiz of quizzes) {
+          if (await canAccessQuiz(user.id, quiz)) {
+            hasAccess = true;
+            break;
+          }
+        }
+
+        if (!hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
+        }
       }
     }
 
     const response = { document };
 
-    await setCache(cacheKey, response, 300);
+    // Don't cache document access - lesson requests can change access dynamically
+    // await setCache(cacheKey, response, 300);
 
     return c.json(response);
   } catch (error) {
@@ -896,11 +912,12 @@ export const getDocumentStatus = async (c: Context) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const cacheKey = `document:status:${id}:${user.id}`;
-    const cached = await getFromCache<any>(cacheKey);
-    if (cached) {
-      return c.json(cached);
-    }
+    // Don't cache document status access checks - they can change when lesson requests are accepted
+    // const cacheKey = `document:status:${id}:${user.id}`;
+    // const cached = await getFromCache<any>(cacheKey);
+    // if (cached) {
+    //   return c.json(cached);
+    // }
 
     const document = await prisma.document.findUnique({
       where: { id },
@@ -923,22 +940,36 @@ export const getDocumentStatus = async (c: Context) => {
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
+      // Check if user has lesson request access (grants access to all documents from this user)
+      const lessonRequest = await prisma.lessonRequest.findUnique({
+        where: {
+          requesterId_recipientId: {
+            requesterId: user.id,
+            recipientId: document.userId,
+          },
+        },
       });
 
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
+      const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
 
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
+      if (!hasLessonAccess) {
+        // Get quizzes for this document
+        const quizzes = await prisma.customQuiz.findMany({
+          where: { documentId: id },
+        });
+
+        // Check if user can access any quiz from this document
+        let hasAccess = false;
+        for (const quiz of quizzes) {
+          if (await canAccessQuiz(user.id, quiz)) {
+            hasAccess = true;
+            break;
+          }
+        }
+
+        if (!hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
+        }
       }
     }
 
@@ -999,8 +1030,9 @@ export const getDocumentStatus = async (c: Context) => {
       },
     };
 
-    const ttl = status === "completed" ? 300 : 5;
-    await setCache(cacheKey, response, ttl);
+    // Don't cache document status - lesson requests can change access dynamically
+    // const ttl = status === "completed" ? 300 : 5;
+    // await setCache(cacheKey, response, ttl);
 
     return c.json(response);
   } catch (error) {

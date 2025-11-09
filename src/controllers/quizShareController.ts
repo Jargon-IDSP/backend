@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../services/notificationService";
 
 /**
  * Update quiz visibility
@@ -53,7 +54,7 @@ export const updateQuizVisibility = async (c: Context) => {
 
 /**
  * Share quiz with specific friend (SPECIFIC visibility mode)
- * Only works if quiz visibility is set to SPECIFIC
+ * Automatically sets quiz visibility to SPECIFIC if not already set
  */
 export const shareQuizWithFriend = async (c: Context) => {
   try {
@@ -77,11 +78,12 @@ export const shareQuizWithFriend = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
+    // Automatically set visibility to SPECIFIC if it's not already set
     if (quiz.visibility !== "SPECIFIC") {
-      return c.json({
-        success: false,
-        error: "Quiz must have SPECIFIC visibility to share with individual friends"
-      }, 400);
+      await prisma.customQuiz.update({
+        where: { id: customQuizId },
+        data: { visibility: "SPECIFIC" },
+      });
     }
 
     // Check if they're friends (mutual follow)
@@ -140,6 +142,26 @@ export const shareQuizWithFriend = async (c: Context) => {
         },
       },
     });
+
+    // Create notification for the friend
+    try {
+      const sharerName = user.firstName || user.username || "Someone";
+      console.log(`📬 Attempting to create QUIZ_SHARED notification for user ${friendUserId} from ${userId} (${sharerName})`);
+      
+      const notification = await createNotification({
+        userId: friendUserId, // Notify the friend receiving the share
+        type: "QUIZ_SHARED" as any, // Will work at runtime after Prisma regeneration
+        title: "Lesson Shared",
+        message: `${sharerName} shared a lesson with you`,
+        actionUrl: "/learning/shared",
+      });
+      
+      console.log(`✅ Successfully created notification:`, notification.id);
+    } catch (notifError) {
+      console.error("❌ Failed to create quiz share notification:", notifError);
+      console.error("Error details:", notifError instanceof Error ? notifError.message : String(notifError));
+      // Don't fail the whole process if notification fails
+    }
 
     return c.json({ success: true, data: share });
   } catch (error) {
@@ -306,6 +328,15 @@ export const getSharedWithMe = async (c: Context) => {
             isDefault: true,
           },
         },
+        sharedWith: {
+          where: {
+            sharedWithUserId: userId,
+          },
+          select: {
+            id: true,
+            sharedAt: true,
+          },
+        },
         _count: {
           select: { questions: true },
         },
@@ -315,22 +346,34 @@ export const getSharedWithMe = async (c: Context) => {
       },
     });
 
-    // Map custom categories to general (id: 6) for non-owners
+    // Transform quizzes to match SharedQuiz interface expected by frontend
     const mappedQuizzes = quizzes.map((quiz) => {
-      // If the quiz has a custom category (userId is set), map it to general for viewers
+      // Get the share record for this user (if it exists)
+      const shareRecord = quiz.sharedWith && quiz.sharedWith.length > 0 
+        ? quiz.sharedWith[0] 
+        : null;
+
+      // Map custom categories to general (id: 6) for non-owners
+      let categoryName = quiz.category.name;
       if (quiz.category.userId !== null && quiz.category.userId !== userId) {
-        return {
-          ...quiz,
-          categoryId: 6, // General category
-          category: {
-            id: 6,
-            name: "General",
-            userId: null,
-            isDefault: true,
-          },
-        };
+        categoryName = "General";
       }
-      return quiz;
+
+      // Transform to SharedQuiz format
+      return {
+        id: shareRecord?.id || quiz.id,
+        documentId: quiz.documentId,
+        sharedAt: shareRecord?.sharedAt.toISOString() || quiz.createdAt.toISOString(),
+        customQuiz: {
+          id: quiz.id,
+          name: quiz.name,
+          category: categoryName,
+          createdAt: quiz.createdAt.toISOString(),
+          documentId: quiz.documentId,
+          user: quiz.user,
+          _count: quiz._count,
+        },
+      };
     });
 
     return c.json({ success: true, data: mappedQuizzes });
@@ -407,11 +450,12 @@ export const shareWithMultipleFriends = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
+    // Automatically set visibility to SPECIFIC if it's not already set
     if (quiz.visibility !== "SPECIFIC") {
-      return c.json({
-        success: false,
-        error: "Quiz must have SPECIFIC visibility to share with individual friends"
-      }, 400);
+      await prisma.customQuiz.update({
+        where: { id: customQuizId },
+        data: { visibility: "SPECIFIC" },
+      });
     }
 
     // Get mutual friends
@@ -460,6 +504,38 @@ export const shareWithMultipleFriends = async (c: Context) => {
     );
 
     const successfulShares = shares.filter((s) => s !== null);
+
+    // Create notifications for all friends who received the share
+    try {
+      const sharerName = user.firstName || user.username || "Someone";
+      console.log(`📬 Attempting to create ${successfulShares.length} QUIZ_SHARED notifications from ${userId} (${sharerName})`);
+      
+      await Promise.all(
+        successfulShares.map((share) =>
+          createNotification({
+            userId: share.sharedWithUserId, // Notify each friend receiving the share
+            type: "QUIZ_SHARED" as any, // Will work at runtime after Prisma regeneration
+            title: "Lesson Shared",
+            message: `${sharerName} shared a lesson with you`,
+            actionUrl: "/learning/shared",
+          })
+            .then((notification) => {
+              console.log(`✅ Created notification ${notification.id} for user ${share.sharedWithUserId}`);
+            })
+            .catch((notifError) => {
+              console.error(`❌ Failed to create notification for user ${share.sharedWithUserId}:`, notifError);
+              console.error("Error details:", notifError instanceof Error ? notifError.message : String(notifError));
+              // Don't fail the whole process if notification fails
+            })
+        )
+      );
+      
+      console.log(`✅ Finished creating notifications for ${successfulShares.length} friends`);
+    } catch (notifError) {
+      console.error("❌ Failed to create quiz share notifications:", notifError);
+      console.error("Error details:", notifError instanceof Error ? notifError.message : String(notifError));
+      // Don't fail the whole process if notification fails
+    }
 
     return c.json({
       success: true,

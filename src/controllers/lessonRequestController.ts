@@ -70,6 +70,23 @@ export const createLessonRequest = async (c: Context) => {
           updatedAt: new Date() 
         },
       });
+
+      // Create notification for the recipient
+      try {
+        const requesterName = user.firstName || user.username || "Someone";
+        await createNotification({
+          userId: recipientId, // Notify the person receiving the request
+          type: "FRIEND_REQUEST",
+          title: "New Lesson Request",
+          message: `${requesterName} wants to see all your lessons`,
+          actionUrl: `/profile/friends/${userId}`,
+          lessonRequestId: updated.id,
+        });
+      } catch (notifError) {
+        console.error("Failed to create lesson request notification:", notifError);
+        // Don't fail the whole process if notification fails
+      }
+
       return c.json({ success: true, data: updated });
     }
 
@@ -80,6 +97,22 @@ export const createLessonRequest = async (c: Context) => {
         status: "PENDING",
       },
     });
+
+    // Create notification for the recipient
+    try {
+      const requesterName = user.firstName || user.username || "Someone";
+      await createNotification({
+        userId: recipientId, // Notify the person receiving the request
+        type: "FRIEND_REQUEST",
+        title: "New Lesson Request",
+        message: `${requesterName} wants to see all your lessons`,
+        actionUrl: `/profile/friends/${userId}`,
+        lessonRequestId: request.id,
+      });
+    } catch (notifError) {
+      console.error("Failed to create lesson request notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
 
     return c.json({ success: true, data: request });
   } catch (error) {
@@ -171,7 +204,7 @@ export const acceptLessonRequest = async (c: Context) => {
         type: "LESSON_APPROVED",
         title: "Lesson Access Granted!",
         message: `${user.firstName || user.username || "Someone"} has granted you access to their lessons.`,
-        actionUrl: `/profile/${userId}`,
+        actionUrl: `/profile/friends/${userId}`,
         lessonRequestId: request.id,
       });
     } catch (notifError) {
@@ -333,6 +366,50 @@ export const getLessonRequestStatus = async (c: Context) => {
   } catch (error) {
     console.error("Error getting lesson request status:", error);
     return c.json({ success: false, error: "Failed to get lesson request status" }, 500);
+  }
+};
+
+/**
+ * Get lesson request by ID (for notifications)
+ */
+export const getLessonRequestById = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+    const requestId = c.req.param("id");
+
+    if (!requestId) {
+      return c.json({ success: false, error: "Request ID is required" }, 400);
+    }
+
+    const request = await prisma.lessonRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        requester: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      return c.json({ success: false, error: "Request not found" }, 404);
+    }
+
+    // Security: Only the recipient can view the request
+    if (request.recipientId !== userId) {
+      return c.json({ success: false, error: "Unauthorized" }, 403);
+    }
+
+    return c.json({ success: true, data: request });
+  } catch (error) {
+    console.error("Error getting lesson request by ID:", error);
+    return c.json({ success: false, error: "Failed to get lesson request" }, 500);
   }
 };
 
