@@ -613,6 +613,7 @@ enum NotificationType {
   DOCUMENT_READY
   FRIEND_REQUEST
   LESSON_APPROVED
+  QUIZ_SHARED
 }
 
 model Notification {
