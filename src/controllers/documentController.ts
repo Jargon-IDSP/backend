@@ -276,7 +276,7 @@ export async function generateFlashcardsOptimizedLanguages(
         data: { categoryId, ocrProcessed: true }
       }),
       prisma.customQuiz.create({
-        data: { ...quizData, visibility: 'PRIVATE' }
+        data: quizData
       }),
       ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
       ...questionData.map((data) => prisma.customQuestion.create({ data })),
@@ -535,10 +535,7 @@ export async function generateFlashcardsFull(
         data: { categoryId, ocrProcessed: true }
       }),
       prisma.customQuiz.create({
-        data: {
-          ...quizData,
-          visibility: 'PRIVATE', // Set default visibility to PRIVATE
-        }
+        data: quizData
       }),
       ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
       ...questionData.map((data) => prisma.customQuestion.create({ data })),
@@ -547,6 +544,53 @@ export async function generateFlashcardsFull(
     console.log(
       `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database\n`
     );
+
+    // Verify the data is actually visible in the database before sending notification
+    console.log("🔍 Verifying database records are visible...");
+    const verification = await prisma.customQuiz.findFirst({
+      where: {
+        id: quizData.id,
+        documentId: documentId
+      },
+      include: {
+        questions: true,
+        document: {
+          include: {
+            flashcards: {
+              where: { documentId: documentId }
+            }
+          }
+        }
+      }
+    });
+
+    if (!verification || verification.questions.length === 0 || verification.document.flashcards.length === 0) {
+      console.error("⚠️ Database verification failed - records not visible yet!");
+      console.error(`Quiz: ${verification ? 'found' : 'NOT FOUND'}`);
+      console.error(`Questions: ${verification?.questions.length || 0}`);
+      console.error(`Flashcards: ${verification?.document.flashcards.length || 0}`);
+      // Wait a moment and try again
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const retryVerification = await prisma.customQuiz.findFirst({
+        where: { id: quizData.id },
+        include: {
+          questions: true,
+          document: {
+            include: {
+              flashcards: { where: { documentId: documentId } }
+            }
+          }
+        }
+      });
+
+      if (!retryVerification || retryVerification.questions.length === 0 || retryVerification.document.flashcards.length === 0) {
+        throw new Error("Database records not visible after transaction - data integrity issue");
+      }
+      console.log("✅ Database records verified on retry");
+    } else {
+      console.log(`✅ Database records verified: ${verification.questions.length} questions, ${verification.document.flashcards.length} flashcards`);
+    }
 
     await redisClient.del(quickCacheKey);
 
@@ -564,7 +608,7 @@ export async function generateFlashcardsFull(
     ]);
     console.log("✅ Cache invalidation complete");
 
-    // Create notification for document completion
+    // Create notification for document completion ONLY after verifying data exists
     try {
       await createNotification({
         userId,
@@ -963,6 +1007,63 @@ export const getDownloadUrl = async (c: Context) => {
     return c.json({ downloadUrl });
   } catch (error) {
     console.error("Get download URL error:", error);
+    return c.json({ error: String(error) }, 500);
+  }
+};
+
+export const updateDocument = async (c: Context) => {
+  try {
+    const id = c.req.param("id");
+    const user = c.get("user");
+
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const document = await prisma.document.findUnique({
+      where: { id },
+    });
+
+    if (!document) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+
+    if (document.userId !== user.id) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    const body = await c.req.json();
+    const { name } = body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return c.json({ error: "Invalid document name" }, 400);
+    }
+
+    // Update document and associated quiz in a transaction
+    const [updatedDocument] = await prisma.$transaction([
+      prisma.document.update({
+        where: { id },
+        data: { filename: name.trim() },
+      }),
+      // Update the associated custom quiz name to match
+      prisma.customQuiz.updateMany({
+        where: { documentId: id },
+        data: { name: name.trim() },
+      }),
+    ]);
+
+    console.log("🔄 Invalidating caches after document update...");
+    await Promise.all([
+      invalidateCachePattern(`documents:user:${user.id}`),
+      invalidateCachePattern(`document:${id}`),
+    ]);
+
+    return c.json({
+      success: true,
+      data: updatedDocument
+    });
+  } catch (error) {
+    console.error("Update document error:", error);
     return c.json({ error: String(error) }, 500);
   }
 };

@@ -17,6 +17,7 @@ import {
   errorResponse,
   successResponse,
 } from "./helperFunctions/responseHelper";
+import { addWeeklyScore } from "./helperFunctions/weeklyTrackingHelper";
 import redisClient from "../lib/redis";
 import { prisma } from "../lib/prisma";
 
@@ -654,6 +655,8 @@ export const completeQuiz = async (c: Context) => {
       score,
       totalQuestions,
       levelId: requestLevelId,
+      industryId,
+      quizNumber,
     } = await c.req.json();
 
     console.log("Complete quiz request:", {
@@ -663,6 +666,8 @@ export const completeQuiz = async (c: Context) => {
       score,
       totalQuestions,
       requestLevelId,
+      industryId,
+      quizNumber,
     });
 
     if (!type || score === undefined || !totalQuestions) {
@@ -673,8 +678,11 @@ export const completeQuiz = async (c: Context) => {
       );
     }
 
-    const pointsEarned = score * 5;
-    console.log("Points earned:", pointsEarned);
+    // Boss quizzes (quiz 3) earn 20 points per question, others earn 10
+    const isBossQuiz = quizNumber === 3;
+    const pointsPerQuestion = isBossQuiz ? 20 : 10;
+    const pointsEarned = score * pointsPerQuestion;
+    console.log("Points earned:", pointsEarned, "(Boss quiz:", isBossQuiz, ")");
 
     if (type === "existing") {
       if (!quizId || !requestLevelId) {
@@ -687,10 +695,33 @@ export const completeQuiz = async (c: Context) => {
 
       const percentCorrect = Math.round((score / totalQuestions) * 100);
 
+      // Find the prebuilt quiz based on levelId, industryId, and quizNumber
+      const prebuiltQuiz = await prisma.prebuiltQuiz.findFirst({
+        where: {
+          levelId: parseInt(requestLevelId),
+          quizNumber: quizNumber || 1,
+          industryId: industryId || null,
+        },
+      });
+
+      if (!prebuiltQuiz) {
+        console.error("Prebuilt quiz not found for:", {
+          levelId: requestLevelId,
+          quizNumber,
+          industryId,
+        });
+        return errorResponse(
+          c,
+          "Prebuilt quiz not found",
+          404
+        );
+      }
+
       const quizAttempt = await prisma.userQuizAttempt.create({
         data: {
           id: quizId,
           userId,
+          prebuiltQuizId: prebuiltQuiz.id,
           levelId: parseInt(requestLevelId),
           questionsAnswered: totalQuestions,
           questionsCorrect: score,
@@ -698,7 +729,7 @@ export const completeQuiz = async (c: Context) => {
           percentComplete: 100,
           percentCorrect,
           pointsEarned,
-          maxPossiblePoints: totalQuestions * 5,
+          maxPossiblePoints: totalQuestions * pointsPerQuestion,
           completed: true,
           completedAt: new Date(),
         },
@@ -742,6 +773,16 @@ export const completeQuiz = async (c: Context) => {
       });
 
       console.log("Updated user score and weekly stats");
+
+      // Award badges if this is a boss quiz (quiz 3) and user has completed all 3 quizzes
+      if (quizNumber && industryId !== undefined) {
+        await awardBadgesForCompletion(
+          userId,
+          parseInt(requestLevelId),
+          industryId || null,
+          quizNumber
+        );
+      }
 
       // Invalidate user-related caches after quiz completion
       await invalidateCachePattern(`questions:user:${userId}:*`);
@@ -1219,6 +1260,11 @@ export const getCustomQuizById = async (c: Context) => {
       },
       include: {
         document: true,
+        user: {
+          select: {
+            defaultPrivacy: true,
+          },
+        },
         category: {
           select: {
             name: true,
@@ -1256,6 +1302,7 @@ export const getCustomQuizById = async (c: Context) => {
       category: quiz.category?.name || null,
       question_count: enrichedQuestions.length,
       selectedLanguage: lang,
+      visibility: quiz.user.defaultPrivacy,
     });
 
     // Cache for 5 minutes
@@ -1717,6 +1764,9 @@ export const getUserLessonNames = async (c: Context) => {
 
     const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
 
+    console.log(`📋 getUserLessonNames: currentUser=${currentUserId}, targetUser=${targetUserId}`);
+    console.log(`👥 areFriends=${areFriends}, hasLessonAccess=${hasLessonAccess}`);
+
     // If user has lesson access, return ALL lessons regardless of visibility
     // Otherwise, build query conditions based on friendship status
     let whereCondition: any;
@@ -1727,32 +1777,102 @@ export const getUserLessonNames = async (c: Context) => {
         userId: targetUserId,
       };
     } else {
-      // Build query conditions based on friendship status
-      const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+      // Get the target user's privacy setting
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { defaultPrivacy: true },
+      });
 
-      if (areFriends) {
-        visibilityConditions.push({ visibility: "FRIENDS" });
+      if (!targetUser) {
+        return c.json({ success: false, error: "Target user not found" }, 404);
       }
 
-      whereCondition = {
-        userId: targetUserId,
-        OR: visibilityConditions,
-      };
+      const privacy = targetUser.defaultPrivacy;
+
+      if (privacy === "PUBLIC") {
+        // PUBLIC: Everyone can see
+        whereCondition = { userId: targetUserId };
+      } else if (privacy === "FRIENDS" && areFriends) {
+        // FRIENDS: Only friends can see, and we are friends
+        // Also include PRIVATE quizzes explicitly shared with this user
+        whereCondition = {
+          userId: targetUserId,
+          OR: [
+            // All quizzes if FRIENDS privacy
+            { userId: targetUserId },
+            // Plus any PRIVATE quizzes shared with me
+            {
+              sharedWith: {
+                some: {
+                  sharedWithUserId: currentUserId,
+                },
+              },
+            },
+          ],
+        };
+      } else if (privacy === "PRIVATE" && areFriends) {
+        // PRIVATE but we are friends: Show all lessons (frontend will show locks for unshared ones)
+        whereCondition = { userId: targetUserId };
+      } else if (privacy === "PRIVATE") {
+        // PRIVATE and not friends: Only explicitly shared quizzes
+        whereCondition = {
+          userId: targetUserId,
+          sharedWith: {
+            some: {
+              sharedWithUserId: currentUserId,
+            },
+          },
+        };
+      } else {
+        // No access
+        whereCondition = {
+          userId: targetUserId,
+          id: "impossible-to-match",
+        };
+      }
     }
 
-    // Get only id and name from lessons
+    console.log(`🔍 Query condition:`, JSON.stringify(whereCondition, null, 2));
+
+    // Get lessons with share information
     const lessons = await prisma.customQuiz.findMany({
       where: whereCondition,
       select: {
         id: true,
         name: true,
+        sharedWith: {
+          where: {
+            sharedWithUserId: currentUserId,
+          },
+          select: {
+            id: true,
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",
       },
     });
 
-    return c.json({ success: true, data: lessons });
+    console.log(`📚 Found ${lessons.length} lessons:`, lessons);
+
+    // For PRIVATE privacy with friends, check which lessons are actually accessible
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { defaultPrivacy: true },
+    });
+
+    const isPrivateAndFriends = targetUser?.defaultPrivacy === "PRIVATE" && areFriends;
+
+    return c.json({
+      success: true,
+      data: lessons.map(l => ({
+        id: l.id,
+        name: l.name,
+        // If PRIVATE and friends, only allow access if explicitly shared
+        isLocked: isPrivateAndFriends && l.sharedWith.length === 0,
+      }))
+    });
   } catch (error: any) {
     console.error("Error fetching user lesson names:", error);
     return errorResponse(
@@ -1818,18 +1938,49 @@ export const getLessonDetails = async (c: Context) => {
         userId: userId,
       };
     } else {
-      // Build query conditions based on friendship status
-      const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
+      // Get the target user's privacy setting
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { defaultPrivacy: true },
+      });
 
-      if (areFriends) {
-        visibilityConditions.push({ visibility: "FRIENDS" });
+      if (!targetUser) {
+        return c.json({ success: false, error: "User not found" }, 404);
       }
 
-      whereCondition = {
-        id: lessonId,
-        userId: userId,
-        OR: visibilityConditions,
-      };
+      const privacy = targetUser.defaultPrivacy;
+
+      if (privacy === "PUBLIC") {
+        // PUBLIC: Everyone can see
+        whereCondition = {
+          id: lessonId,
+          userId: userId,
+        };
+      } else if (privacy === "FRIENDS" && areFriends) {
+        // FRIENDS: Only friends can see, and we are friends
+        whereCondition = {
+          id: lessonId,
+          userId: userId,
+        };
+      } else if (privacy === "PRIVATE") {
+        // PRIVATE: Only if explicitly shared
+        whereCondition = {
+          id: lessonId,
+          userId: userId,
+          sharedWith: {
+            some: {
+              sharedWithUserId: currentUserId,
+            },
+          },
+        };
+      } else {
+        // No access
+        whereCondition = {
+          id: lessonId,
+          userId: userId,
+          id: "impossible-to-match",
+        };
+      }
     }
 
     // Get lesson details
@@ -1947,3 +2098,82 @@ export const getAllCategories = async (c: Context) => {
     return errorResponse(c, "Failed to fetch categories");
   }
 };
+
+/**
+ * Award badges when user completes a quiz
+ * This mirrors the logic in prebuiltQuizHelper.ts but works with the existing quiz system
+ */
+async function awardBadgesForCompletion(
+  userId: string,
+  levelId: number,
+  industryId: number | null,
+  quizNumber: number
+): Promise<void> {
+  // Update apprenticeship progress
+  const progress = await prisma.userApprenticeshipProgress.upsert({
+    where: {
+      userId_levelId_industryId: {
+        userId,
+        levelId,
+        industryId: industryId || null,
+      },
+    },
+    update: {
+      quizzesCompleted: {
+        increment: 1,
+      },
+    },
+    create: {
+      userId,
+      levelId,
+      industryId: industryId || null,
+      quizzesCompleted: 1,
+      isLevelComplete: false,
+    },
+  });
+
+  console.log("Updated apprenticeship progress:", progress);
+
+  // Check if level is complete (3 quizzes completed - boss quiz is quiz 3)
+  if (progress.quizzesCompleted >= 3 && !progress.isLevelComplete) {
+    await prisma.userApprenticeshipProgress.update({
+      where: {
+        userId_levelId_industryId: {
+          userId,
+          levelId,
+          industryId: industryId || null,
+        },
+      },
+      data: {
+        isLevelComplete: true,
+        completedAt: new Date(),
+      },
+    });
+
+    console.log("Level completed! Awarding badge...");
+
+    // Award level completion badge
+    const levelBadge = await prisma.badge.findFirst({
+      where: {
+        levelId,
+        industryId: industryId || null,
+      },
+    });
+
+    if (levelBadge) {
+      await prisma.userBadge.create({
+        data: {
+          userId,
+          badgeId: levelBadge.id,
+        },
+      }).catch((error) => {
+        // Ignore duplicate badge errors
+        console.log("Badge already exists or error:", error.message);
+      });
+
+      console.log("Badge awarded:", levelBadge.name);
+    } else {
+      console.log("No badge found for level:", levelId, "industry:", industryId);
+    }
+  }
+}

@@ -97,7 +97,8 @@ const customRoutes = new Hono()
   .get("/random/flashcard", getRandomCustomFlashcard)
   .get("/random/question", getRandomCustomQuestion)
 
-  .get("/quiz/generate", generateCustomQuiz);
+  .get("/quiz/generate", generateCustomQuiz)
+  .get("/quiz/:quizId", getCustomQuizById);
 
 const documentLearningRoutes = new Hono()
   .get("/:documentId/overview", getCustomQuizByDocument) // Changed from getCustomQuizById

@@ -445,25 +445,43 @@ export const getLevels = async (c: Context) => {
       );
     }
 
-    // Get user's completed levels (at least 70% correct)
-    const completedLevels = await prisma.userQuizAttempt.findMany({
+    // Get user's apprenticeship progress to determine which levels are unlocked
+    const userProgress = await prisma.userApprenticeshipProgress.findMany({
       where: {
         userId,
-        levelId: { in: levels.map(l => l.id) },
-        completed: true,
-        percentCorrect: { gte: 70 }, // Must get 70% or higher
+        industryId: parsedIndustryId,
       },
       select: {
         levelId: true,
+        isLevelComplete: true,
+        quizzesCompleted: true,
       },
-      distinct: ['levelId'],
     });
 
-    const completedLevelIds = new Set(completedLevels.map(l => l.levelId));
+    // Create a map of level completion status
+    const progressMap = new Map(
+      userProgress.map(p => [p.levelId, { completed: p.isLevelComplete, quizzesCompleted: p.quizzesCompleted }])
+    );
 
     const levelsWithCounts = await Promise.all(
       levels.map(async (level: LevelData) => {
         const terms = await calculateAvailableTerms(level.id, parsedIndustryId);
+        const progress = progressMap.get(level.id);
+
+        // Level unlocking logic:
+        // - Level 1 is always unlocked
+        // - Level 2 is unlocked if Level 1 is complete (all 3 quizzes done, including boss quiz)
+        // - Level 3 is unlocked if Level 2 is complete
+        let isUnlocked = false;
+        if (level.id === 1) {
+          isUnlocked = true; // Level 1 always unlocked
+        } else if (level.id === 2) {
+          const level1Progress = progressMap.get(1);
+          isUnlocked = level1Progress?.completed || false;
+        } else if (level.id === 3) {
+          const level2Progress = progressMap.get(2);
+          isUnlocked = level2Progress?.completed || false;
+        }
 
         return {
           ...level,
@@ -471,7 +489,9 @@ export const getLevels = async (c: Context) => {
           industry_terms: terms.industryCount,
           general_terms: terms.generalCount,
           total_general_terms: terms.totalGeneralCount,
-          completed: completedLevelIds.has(level.id),
+          completed: progress?.completed || false,
+          unlocked: isUnlocked,
+          quizzesCompleted: progress?.quizzesCompleted || 0,
         };
       })
     );

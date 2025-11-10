@@ -7,7 +7,9 @@
     "start": "tsx --watch src/index.ts",
     "seed": "tsx src/seeds/flashcardSeeder.ts",
     "seed-questions": "tsx src/seeds/questionSeeder.ts",
-    "seed-all": "npm run seed && npm run seed-questions && npm run migrate-users",
+    "seed-prebuilt": "tsx src/seeds/runPrebuiltSeeder.ts",
+    "seed-badges": "tsx src/seeds/runBadgeSeeder.ts",
+    "seed-all": "npm run seed && npm run seed-questions && npm run seed-prebuilt && npm run seed-badges && npm run migrate-users",
     "migrate-users": "tsx src/seeds/migrateUsers.ts",
     "build": "prisma generate && tsc",
     "postinstall": "prisma generate"

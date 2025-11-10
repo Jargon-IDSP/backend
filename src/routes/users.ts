@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cacheMiddleware } from "../middleware/cache";
 import { UserService } from "../services/userService";
+import { prisma } from "../lib/prisma";
 
 const app = new Hono();
 const userService = new UserService();
@@ -10,10 +11,25 @@ app.get("/users", cacheMiddleware(300), async (c) => {
   return c.json({ message: "Users endpoint - implement with Redis if needed" });
 });
 
-// Using manual caching with cache-aside pattern
+// Get user by ID - no caching for friend profiles
 app.get("/users/:id", async (c) => {
   const userId = c.req.param("id");
-  const user = await userService.getUserById(userId);
+
+  // Query database directly without caching
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      username: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      score: true,
+      industryId: true,
+      defaultPrivacy: true,
+      createdAt: true,
+    },
+  });
 
   if (!user) {
     return c.json({ error: "User not found" }, 404);
@@ -30,6 +46,56 @@ app.put("/users/:id", async (c) => {
   await userService.invalidateUserCache(userId);
 
   return c.json({ success: true });
+});
+
+// Update user privacy settings
+app.put("/users/privacy", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  try {
+    const { defaultPrivacy } = await c.req.json();
+
+    // Validate the privacy setting
+    const validSettings = ["PRIVATE", "FRIENDS", "PUBLIC"];
+    if (!validSettings.includes(defaultPrivacy)) {
+      return c.json({ error: "Invalid privacy setting" }, 400);
+    }
+
+    console.log(`🔒 Updating privacy for user ${user.id} to ${defaultPrivacy}`);
+
+    // Update the user's default privacy
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { defaultPrivacy },
+      select: {
+        id: true,
+        defaultPrivacy: true,
+      },
+    });
+
+    console.log(`✅ User privacy updated to ${updatedUser.defaultPrivacy}`);
+
+    // Note: We no longer update CustomQuiz.visibility as it has been removed from the schema.
+    // Privacy is now controlled solely by User.defaultPrivacy, which is checked at query time.
+    // PRIVATE -> use CustomQuizShare table for access control
+    // FRIENDS -> all mutual friends can see (checked via Follow table)
+    // PUBLIC -> everyone can see
+
+    // Invalidate user cache
+    await userService.invalidateUserCache(user.id);
+
+    return c.json({
+      success: true,
+      defaultPrivacy: updatedUser.defaultPrivacy,
+    });
+  } catch (error) {
+    console.error("Error updating privacy settings:", error);
+    return c.json({ error: "Failed to update privacy settings" }, 500);
+  }
 });
 
 export default app;

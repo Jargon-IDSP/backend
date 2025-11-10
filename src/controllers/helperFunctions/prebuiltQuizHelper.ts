@@ -253,7 +253,7 @@ export async function recordPrebuiltQuizAnswer(
 ): Promise<{ isCorrect: boolean; pointsEarned: number }> {
   // Check if this is a flashcard-based question or a regular question
   let isCorrect = false;
-  let pointsPerQuestion = 5;
+  let pointsPerQuestion = 10;
 
   const attempt = await prisma.userQuizAttempt.findUnique({
     where: { id: attemptId },
@@ -405,56 +405,11 @@ async function awardBadgesForCompletion(
     },
   });
 
-  // Check if this is the first quiz - award "First Steps" badge
-  const totalCompletedQuizzes = await prisma.userQuizAttempt.count({
-    where: {
-      userId,
-      completed: true,
-    },
-  });
+  // Badge awarding is now only for level completion
+  // "First Steps" and "Boss Slayer" badges have been removed from the system
 
-  if (totalCompletedQuizzes === 1) {
-    const firstQuizBadge = await prisma.badge.findUnique({
-      where: { code: 'first-quiz' },
-    });
-
-    if (firstQuizBadge) {
-      await prisma.userBadge.create({
-        data: {
-          userId,
-          badgeId: firstQuizBadge.id,
-        },
-      }).catch(() => {}); // Ignore if already exists
-    }
-  }
-
-  // Check if this is a boss quiz - award "Boss Slayer" badge
-  if (quizType === 'BOSS_QUIZ' && passed) {
-    const bossQuizBadge = await prisma.badge.findUnique({
-      where: { code: 'boss-slayer' },
-    });
-
-    if (bossQuizBadge) {
-      const existingBossSlayer = await prisma.userBadge.findFirst({
-        where: {
-          userId,
-          badgeId: bossQuizBadge.id,
-        },
-      });
-
-      if (!existingBossSlayer) {
-        await prisma.userBadge.create({
-          data: {
-            userId,
-            badgeId: bossQuizBadge.id,
-          },
-        });
-      }
-    }
-  }
-
-  // Check if level is complete (5 quizzes completed)
-  if (progress.quizzesCompleted >= 5 && !progress.isLevelComplete) {
+  // Check if level is complete (3 quizzes completed - boss quiz is quiz 3)
+  if (progress.quizzesCompleted >= 3 && !progress.isLevelComplete) {
     await prisma.userApprenticeshipProgress.update({
       where: {
         userId_levelId_industryId: {
@@ -481,15 +436,7 @@ async function awardBadgesForCompletion(
     }
   }
 
-  // Check points milestones
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { score: true },
-  });
-
-  if (user) {
-    await awardPointsMilestoneBadges(userId, user.score);
-  }
+  // Points milestone badges have been removed
 }
 
 /**
@@ -501,50 +448,10 @@ async function findLevelCompletionBadge(
 ): Promise<any> {
   return await prisma.badge.findFirst({
     where: {
-      category: 'LEVEL_COMPLETION',
       levelId,
       industryId: industryId || null,
     },
   });
-}
-
-/**
- * Award points milestone badges
- */
-async function awardPointsMilestoneBadges(
-  userId: string,
-  currentScore: number
-): Promise<void> {
-  const milestones = [100, 250, 500, 1000, 2500, 5000];
-
-  for (const milestone of milestones) {
-    if (currentScore >= milestone) {
-      const badge = await prisma.badge.findFirst({
-        where: {
-          category: 'POINTS_MILESTONE',
-          requiresPoints: milestone,
-        },
-      });
-
-      if (badge) {
-        const existing = await prisma.userBadge.findFirst({
-          where: {
-            userId,
-            badgeId: badge.id,
-          },
-        });
-
-        if (!existing) {
-          await prisma.userBadge.create({
-            data: {
-              userId,
-              badgeId: badge.id,
-            },
-          });
-        }
-      }
-    }
-  }
 }
 
 /**

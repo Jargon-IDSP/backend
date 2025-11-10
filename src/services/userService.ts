@@ -9,14 +9,18 @@ export class UserService {
     const cacheKey = `user:${userId}`;
 
     try {
-      // Try cache first
-      const cached = await redisClient.get(cacheKey);
-      if (cached) {
-        console.log("Cache hit for user:", userId);
-        return JSON.parse(cached);
+      // Try cache first (but don't fail if Redis is down)
+      try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+          console.log("Cache hit for user:", userId);
+          return JSON.parse(cached);
+        }
+      } catch (cacheError) {
+        console.log("Redis unavailable, querying database directly");
       }
 
-      // Cache miss - query database
+      // Cache miss or Redis unavailable - query database
       console.log("Cache miss for user:", userId);
       const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -28,13 +32,18 @@ export class UserService {
           email: true,
           score: true,
           industryId: true,
+          defaultPrivacy: true,
           createdAt: true,
         },
       });
 
       if (user) {
-        // Cache the result
-        await redisClient.setEx(cacheKey, this.CACHE_TTL, JSON.stringify(user));
+        // Try to cache the result (but don't fail if Redis is down)
+        try {
+          await redisClient.setEx(cacheKey, this.CACHE_TTL, JSON.stringify(user));
+        } catch (cacheError) {
+          console.log("Failed to cache user data (Redis unavailable)");
+        }
         return user;
       }
 

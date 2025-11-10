@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { prisma } from '../lib/prisma';
 import type { QuizTemplateData } from '../interfaces/badgeData';
 
-const dataDirectory = '../backend/jargon-terms';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const dataDirectory = path.join(__dirname, '../../jargon-terms');
 
 function loadJsonFile<T>(filePath: string): T {
   try {

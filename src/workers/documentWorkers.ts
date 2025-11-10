@@ -332,27 +332,8 @@ translationWorker.on("progress", (job, progress) => {
 flashcardWorker.on("completed", async (job) => {
   console.log(`✅ Flashcard job ${job.id} completed successfully`);
 
-  // Notify user that everything is ready!
-  const { documentId, userId } = job.data;
-  try {
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
-      select: { filename: true },
-    });
-
-    await createNotification({
-      userId,
-      type: "DOCUMENT_READY",
-      title: "Document Ready!",
-      message: `"${
-        document?.filename || "Your document"
-      }" is ready to study!`,
-      actionUrl: `/learning/custom/categories/${documentId}`,
-      documentId,
-    });
-  } catch (notifError) {
-    console.error("Failed to create completion notification:", notifError);
-  }
+  // Note: Notification is now created in generateFlashcardsFull() in documentController.ts
+  // to ensure it's only sent once with the correct information
 });
 
 flashcardWorker.on("failed", async (job, err) => {

@@ -8,8 +8,7 @@ const badges: BadgeData[] = [
     code: 'foundation-general',
     name: 'Foundation Master - General',
     description: 'Complete all quizzes in Foundation level for General jargon',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'general/G1.svg',
     levelId: 1,
     industryId: null,
   },
@@ -17,40 +16,36 @@ const badges: BadgeData[] = [
     code: 'foundation-electrician',
     name: 'Foundation Master - Electrician',
     description: 'Complete all quizzes in Foundation level for Electrician',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'electrician/E1.svg',
     levelId: 1,
+    industryId: 1,
   },
   {
     code: 'foundation-plumber',
     name: 'Foundation Master - Plumber',
     description: 'Complete all quizzes in Foundation level for Plumber',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'plumber/P1.svg',
     levelId: 1,
   },
   {
     code: 'foundation-carpenter',
     name: 'Foundation Master - Carpenter',
     description: 'Complete all quizzes in Foundation level for Carpenter',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'carpenter/C1.svg',
     levelId: 1,
   },
   {
     code: 'foundation-mechanic',
     name: 'Foundation Master - Mechanic',
     description: 'Complete all quizzes in Foundation level for Mechanic',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'mechanic/E1.svg',
     levelId: 1,
   },
   {
     code: 'foundation-welder',
     name: 'Foundation Master - Welder',
     description: 'Complete all quizzes in Foundation level for Welder',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'welder/W1.svg',
     levelId: 1,
   },
 
@@ -59,8 +54,7 @@ const badges: BadgeData[] = [
     code: 'intermediate-general',
     name: 'Intermediate Master - General',
     description: 'Complete all quizzes in Intermediate level for General jargon',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'general/G2.svg',
     levelId: 2,
     industryId: null,
   },
@@ -68,40 +62,36 @@ const badges: BadgeData[] = [
     code: 'intermediate-electrician',
     name: 'Intermediate Master - Electrician',
     description: 'Complete all quizzes in Intermediate level for Electrician',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'electrician/E2.svg',
     levelId: 2,
+    industryId: 1,
   },
   {
     code: 'intermediate-plumber',
     name: 'Intermediate Master - Plumber',
     description: 'Complete all quizzes in Intermediate level for Plumber',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'plumber/P2.svg',
     levelId: 2,
   },
   {
     code: 'intermediate-carpenter',
     name: 'Intermediate Master - Carpenter',
     description: 'Complete all quizzes in Intermediate level for Carpenter',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'carpenter/C2.svg',
     levelId: 2,
   },
   {
     code: 'intermediate-mechanic',
     name: 'Intermediate Master - Mechanic',
     description: 'Complete all quizzes in Intermediate level for Mechanic',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'mechanic/E2.svg',
     levelId: 2,
   },
   {
     code: 'intermediate-welder',
     name: 'Intermediate Master - Welder',
     description: 'Complete all quizzes in Intermediate level for Welder',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'welder/W2.svg',
     levelId: 2,
   },
 
@@ -110,8 +100,7 @@ const badges: BadgeData[] = [
     code: 'advanced-general',
     name: 'Advanced Master - General',
     description: 'Complete all quizzes in Advanced level for General jargon',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'general/G3.svg',
     levelId: 3,
     industryId: null,
   },
@@ -119,131 +108,37 @@ const badges: BadgeData[] = [
     code: 'advanced-electrician',
     name: 'Advanced Master - Electrician',
     description: 'Complete all quizzes in Advanced level for Electrician',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'electrician/E3.svg',
     levelId: 3,
+    industryId: 1,
   },
   {
     code: 'advanced-plumber',
     name: 'Advanced Master - Plumber',
     description: 'Complete all quizzes in Advanced level for Plumber',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'plumber/P3.svg',
     levelId: 3,
   },
   {
     code: 'advanced-carpenter',
     name: 'Advanced Master - Carpenter',
     description: 'Complete all quizzes in Advanced level for Carpenter',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'carpenter/C3.svg',
     levelId: 3,
   },
   {
     code: 'advanced-mechanic',
     name: 'Advanced Master - Mechanic',
     description: 'Complete all quizzes in Advanced level for Mechanic',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'mechanic/E3.svg',
     levelId: 3,
   },
   {
     code: 'advanced-welder',
     name: 'Advanced Master - Welder',
     description: 'Complete all quizzes in Advanced level for Welder',
-    iconUrl: null,
-    category: 'LEVEL_COMPLETION',
+    iconUrl: 'welder/W3.svg',
     levelId: 3,
-  },
-
-  // Quiz Completion Badges (2)
-  {
-    code: 'first-quiz',
-    name: 'First Steps',
-    description: 'Complete your first quiz',
-    iconUrl: null,
-    category: 'QUIZ_COMPLETION',
-    requiresQuizCount: 1,
-  },
-  {
-    code: 'boss-slayer',
-    name: 'Boss Slayer',
-    description: 'Complete your first Boss Quiz',
-    iconUrl: null,
-    category: 'QUIZ_COMPLETION',
-  },
-
-  // Points Milestone Badges (6)
-  {
-    code: 'points-100',
-    name: 'Getting Started',
-    description: 'Earn 100 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 100,
-  },
-  {
-    code: 'points-250',
-    name: 'On a Roll',
-    description: 'Earn 250 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 250,
-  },
-  {
-    code: 'points-500',
-    name: 'Point Collector',
-    description: 'Earn 500 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 500,
-  },
-  {
-    code: 'points-1000',
-    name: 'Dedicated Learner',
-    description: 'Earn 1,000 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 1000,
-  },
-  {
-    code: 'points-2500',
-    name: 'Knowledge Seeker',
-    description: 'Earn 2,500 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 2500,
-  },
-  {
-    code: 'points-5000',
-    name: 'Master Scholar',
-    description: 'Earn 5,000 points',
-    iconUrl: null,
-    category: 'POINTS_MILESTONE',
-    requiresPoints: 5000,
-  },
-
-  // Streak Badges (3)
-  {
-    code: 'streak-3',
-    name: 'Starting Streak',
-    description: 'Practice for 3 days in a row',
-    iconUrl: null,
-    category: 'STREAK',
-  },
-  {
-    code: 'streak-7',
-    name: 'Week Warrior',
-    description: 'Practice for 7 days in a row',
-    iconUrl: null,
-    category: 'STREAK',
-  },
-  {
-    code: 'streak-30',
-    name: 'Unstoppable',
-    description: 'Practice for 30 days in a row',
-    iconUrl: null,
-    category: 'STREAK',
   },
 ];
 
@@ -269,7 +164,7 @@ export async function seedBadges() {
       // Map industry names to IDs for level completion badges
       let industryId = badgeData.industryId;
 
-      if (badgeData.category === 'LEVEL_COMPLETION' && badgeData.code.includes('-')) {
+      if (badgeData.code.includes('-')) {
         const industryName = badgeData.code.split('-')[1]; // e.g., 'electrician' from 'foundation-electrician'
 
         if (industryName !== 'general') {
@@ -284,22 +179,16 @@ export async function seedBadges() {
             name: badgeData.name,
             description: badgeData.description,
             iconUrl: badgeData.iconUrl,
-            category: badgeData.category,
             levelId: badgeData.levelId || null,
             industryId: industryId || null,
-            requiresQuizCount: badgeData.requiresQuizCount || null,
-            requiresPoints: badgeData.requiresPoints || null,
           },
           create: {
             code: badgeData.code,
             name: badgeData.name,
             description: badgeData.description,
             iconUrl: badgeData.iconUrl,
-            category: badgeData.category,
             levelId: badgeData.levelId || null,
             industryId: industryId || null,
-            requiresQuizCount: badgeData.requiresQuizCount || null,
-            requiresPoints: badgeData.requiresPoints || null,
           },
         });
 
@@ -312,9 +201,6 @@ export async function seedBadges() {
 
     console.log(`\n✨ Successfully seeded ${totalCreated} badges!`);
     console.log(`   Level Completion: 18 badges`);
-    console.log(`   Quiz Completion: 2 badges`);
-    console.log(`   Points Milestones: 6 badges`);
-    console.log(`   Streaks: 3 badges`);
 
   } catch (error) {
     console.error('❌ Error seeding badges:', error);
