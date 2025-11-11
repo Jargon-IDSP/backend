@@ -912,36 +912,22 @@ export const getDocument = async (c: Context) => {
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Check if user has lesson request access (grants access to all documents from this user)
-      const lessonRequest = await prisma.lessonRequest.findUnique({
-        where: {
-          requesterId_recipientId: {
-            requesterId: user.id,
-            recipientId: document.userId,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
-
-      if (!hasLessonAccess) {
-        // Get quizzes for this document
-        const quizzes = await prisma.customQuiz.findMany({
-          where: { documentId: id },
-        });
-
-        // Check if user can access any quiz from this document
-        let hasAccess = false;
-        for (const quiz of quizzes) {
-          if (await canAccessQuiz(user.id, quiz)) {
-            hasAccess = true;
-            break;
-          }
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
         }
+      }
 
-        if (!hasAccess) {
-          return c.json({ error: "Forbidden" }, 403);
-        }
+      if (!hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
     }
 
@@ -1154,36 +1140,22 @@ export const getDocumentStatus = async (c: Context) => {
     const isOwner = document.userId === user.id;
 
     if (!isOwner) {
-      // Check if user has lesson request access (grants access to all documents from this user)
-      const lessonRequest = await prisma.lessonRequest.findUnique({
-        where: {
-          requesterId_recipientId: {
-            requesterId: user.id,
-            recipientId: document.userId,
-          },
-        },
+      // Get quizzes for this document
+      const quizzes = await prisma.customQuiz.findMany({
+        where: { documentId: id },
       });
 
-      const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
-
-      if (!hasLessonAccess) {
-        // Get quizzes for this document
-        const quizzes = await prisma.customQuiz.findMany({
-          where: { documentId: id },
-        });
-
-        // Check if user can access any quiz from this document
-        let hasAccess = false;
-        for (const quiz of quizzes) {
-          if (await canAccessQuiz(user.id, quiz)) {
-            hasAccess = true;
-            break;
-          }
+      // Check if user can access any quiz from this document
+      let hasAccess = false;
+      for (const quiz of quizzes) {
+        if (await canAccessQuiz(user.id, quiz)) {
+          hasAccess = true;
+          break;
         }
+      }
 
-        if (!hasAccess) {
-          return c.json({ error: "Forbidden" }, 403);
-        }
+      if (!hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
     }
 

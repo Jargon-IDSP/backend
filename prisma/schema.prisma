@@ -354,16 +354,20 @@ model CustomQuiz {
 }
 
 model CustomQuizShare {
-  id               String     @id @default(cuid())
+  id               String              @id @default(cuid())
   customQuizId     String
   sharedWithUserId String
-  sharedAt         DateTime   @default(now())
-  customQuiz       CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
-  sharedWith       User       @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  status           LessonRequestStatus @default(PENDING)
+  sharedAt         DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  customQuiz       CustomQuiz          @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  sharedWith       User                @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
 
   @@unique([customQuizId, sharedWithUserId])
   @@index([customQuizId])
   @@index([sharedWithUserId])
+  @@index([status])
+  @@index([customQuizId, status])
   @@map("custom_quiz_shares")
 }
 
@@ -460,9 +464,6 @@ model User {
 
   sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")
 
-  lessonRequestsSent     LessonRequest[] @relation("LessonRequestsSent")
-  lessonRequestsReceived LessonRequest[] @relation("LessonRequestsReceived")
-
   notifications Notification[]
 
   @@index([email])
@@ -520,28 +521,6 @@ enum LessonRequestStatus {
   PENDING
   ACCEPTED
   DENIED
-}
-
-model LessonRequest {
-  id String @id @default(cuid())
-
-  requesterId String
-  recipientId String
-
-  status LessonRequestStatus @default(PENDING)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  requester User @relation("LessonRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
-  recipient User @relation("LessonRequestsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
-
-  @@unique([requesterId, recipientId])
-  @@index([requesterId])
-  @@index([recipientId])
-  @@index([status])
-  @@index([recipientId, status])
-  @@map("lesson_requests")
 }
 
 enum NotificationType {

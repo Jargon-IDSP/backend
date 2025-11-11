@@ -1752,84 +1752,56 @@ export const getUserLessonNames = async (c: Context) => {
       yourFollow?.status === "FOLLOWING" &&
       theirFollow?.status === "FOLLOWING";
 
-    // Check if user has lesson request access
-    const lessonRequest = await prisma.lessonRequest.findUnique({
-      where: {
-        requesterId_recipientId: {
-          requesterId: currentUserId,
-          recipientId: targetUserId,
-        },
-      },
+    // Get the target user's privacy setting
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { defaultPrivacy: true },
     });
 
-    const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
+    if (!targetUser) {
+      return c.json({ success: false, error: "Target user not found" }, 404);
+    }
+
+    const privacy = targetUser.defaultPrivacy;
 
     console.log(`📋 getUserLessonNames: currentUser=${currentUserId}, targetUser=${targetUserId}`);
-    console.log(`👥 areFriends=${areFriends}, hasLessonAccess=${hasLessonAccess}`);
+    console.log(`👥 areFriends=${areFriends}, Privacy=${privacy}`);
+    console.log(`🔄 yourFollow=${yourFollow?.status}, theirFollow=${theirFollow?.status}`);
 
-    // If user has lesson access, return ALL lessons regardless of visibility
-    // Otherwise, build query conditions based on friendship status
+    // Build query conditions based on privacy settings and friendship status
     let whereCondition: any;
 
-    if (hasLessonAccess) {
-      // Return all lessons when lesson request is accepted
-      whereCondition = {
-        userId: targetUserId,
-      };
-    } else {
-      // Get the target user's privacy setting
-      const targetUser = await prisma.user.findUnique({
-        where: { id: targetUserId },
-        select: { defaultPrivacy: true },
-      });
-
-      if (!targetUser) {
-        return c.json({ success: false, error: "Target user not found" }, 404);
-      }
-
-      const privacy = targetUser.defaultPrivacy;
-
-      if (privacy === "PUBLIC") {
-        // PUBLIC: Everyone can see
+    if (privacy === "PUBLIC") {
+      // PUBLIC: Everyone can see all lessons, unlocked
+      whereCondition = { userId: targetUserId };
+    } else if (privacy === "FRIENDS") {
+      if (areFriends) {
+        // FRIENDS + ARE FRIENDS: Show all lessons, unlocked
         whereCondition = { userId: targetUserId };
-      } else if (privacy === "FRIENDS" && areFriends) {
-        // FRIENDS: Only friends can see, and we are friends
-        // Also include PRIVATE quizzes explicitly shared with this user
-        whereCondition = {
-          userId: targetUserId,
-          OR: [
-            // All quizzes if FRIENDS privacy
-            { userId: targetUserId },
-            // Plus any PRIVATE quizzes shared with me
-            {
-              sharedWith: {
-                some: {
-                  sharedWithUserId: currentUserId,
-                },
-              },
-            },
-          ],
-        };
-      } else if (privacy === "PRIVATE" && areFriends) {
-        // PRIVATE but we are friends: Show all lessons (frontend will show locks for unshared ones)
-        whereCondition = { userId: targetUserId };
-      } else if (privacy === "PRIVATE") {
-        // PRIVATE and not friends: Only explicitly shared quizzes
-        whereCondition = {
-          userId: targetUserId,
-          sharedWith: {
-            some: {
-              sharedWithUserId: currentUserId,
-            },
-          },
-        };
       } else {
-        // No access
+        // FRIENDS + NOT FRIENDS: Show nothing (return empty array)
         whereCondition = {
           userId: targetUserId,
           id: "impossible-to-match",
         };
       }
+    } else if (privacy === "PRIVATE") {
+      if (areFriends) {
+        // PRIVATE + ARE FRIENDS: Show all lessons (will be locked unless explicitly shared)
+        whereCondition = { userId: targetUserId };
+      } else {
+        // PRIVATE + NOT FRIENDS: Show nothing (return empty array)
+        whereCondition = {
+          userId: targetUserId,
+          id: "impossible-to-match",
+        };
+      }
+    } else {
+      // Unknown privacy setting - no access
+      whereCondition = {
+        userId: targetUserId,
+        id: "impossible-to-match",
+      };
     }
 
     console.log(`🔍 Query condition:`, JSON.stringify(whereCondition, null, 2));
@@ -1846,6 +1818,7 @@ export const getUserLessonNames = async (c: Context) => {
           },
           select: {
             id: true,
+            status: true,
           },
         },
       },
@@ -1854,24 +1827,25 @@ export const getUserLessonNames = async (c: Context) => {
       },
     });
 
-    console.log(`📚 Found ${lessons.length} lessons:`, lessons);
+    console.log(`📚 Found ${lessons.length} lessons for ${privacy} privacy`);
 
-    // For PRIVATE privacy with friends, check which lessons are actually accessible
-    const targetUser = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: { defaultPrivacy: true },
-    });
-
-    const isPrivateAndFriends = targetUser?.defaultPrivacy === "PRIVATE" && areFriends;
+    // Determine if lessons should be locked
+    // Only PRIVATE + friends scenario requires locks
+    const shouldShowLocks = privacy === "PRIVATE" && areFriends;
 
     return c.json({
       success: true,
-      data: lessons.map(l => ({
-        id: l.id,
-        name: l.name,
-        // If PRIVATE and friends, only allow access if explicitly shared
-        isLocked: isPrivateAndFriends && l.sharedWith.length === 0,
-      }))
+      data: lessons.map(l => {
+        // Check if there's an ACCEPTED share for this lesson
+        const hasAcceptedShare = l.sharedWith.some(share => share.status === "ACCEPTED");
+
+        return {
+          id: l.id,
+          name: l.name,
+          // If PRIVATE and friends, lock lessons that don't have an ACCEPTED share
+          isLocked: shouldShowLocks && !hasAcceptedShare,
+        };
+      })
     });
   } catch (error: any) {
     console.error("Error fetching user lesson names:", error);
@@ -1916,23 +1890,11 @@ export const getLessonDetails = async (c: Context) => {
       yourFollow?.status === "FOLLOWING" &&
       theirFollow?.status === "FOLLOWING";
 
-    // Check if user has lesson request access
-    const lessonRequest = await prisma.lessonRequest.findUnique({
-      where: {
-        requesterId_recipientId: {
-          requesterId: currentUserId,
-          recipientId: userId,
-        },
-      },
-    });
-
-    const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
-
     // Build query conditions based on access
     let whereCondition: any;
 
-    if (hasLessonAccess || currentUserId === userId) {
-      // Return lesson details when lesson request is accepted or viewing own lesson
+    if (currentUserId === userId) {
+      // Return lesson details when viewing own lesson
       whereCondition = {
         id: lessonId,
         userId: userId,
