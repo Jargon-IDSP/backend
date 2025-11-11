@@ -5,6 +5,7 @@ import {
   markAsRead,
   markAllAsRead,
   deleteNotification,
+  clearAllNotifications as clearAllNotificationsService,
 } from "../services/notificationService";
 
 /**
@@ -111,5 +112,29 @@ export const removeNotification = async (c: Context) => {
   } catch (error) {
     console.error("Error deleting notification:", error);
     return c.json({ success: false, error: "Failed to delete notification" }, 500);
+  }
+};
+
+/**
+ * DELETE /notifications/clear-all
+ * Clear all notifications for the current user
+ */
+export const clearAllNotifications = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const result = await clearAllNotificationsService(user.id);
+
+    return c.json({
+      success: true,
+      message: "All notifications cleared",
+      data: { count: result.count }
+    });
+  } catch (error) {
+    console.error("Error clearing all notifications:", error);
+    return c.json({ success: false, error: "Failed to clear notifications" }, 500);
   }
 };

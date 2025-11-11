@@ -6,6 +6,7 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
   removeNotification,
+  clearAllNotifications,
 } from "../controllers/notificationController";
 
 const notificationRoute = new Hono();
@@ -21,6 +22,9 @@ notificationRoute.get("/unread-count", getUnreadNotificationCount);
 
 // Mark all as read
 notificationRoute.patch("/read-all", markAllNotificationsAsRead);
+
+// Clear all notifications
+notificationRoute.delete("/clear-all", clearAllNotifications);
 
 // Mark specific notification as read
 notificationRoute.patch("/:id/read", markNotificationAsRead);
