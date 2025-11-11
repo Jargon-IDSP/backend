@@ -3,24 +3,296 @@ import { prisma } from "../lib/prisma";
 import { createNotification } from "../services/notificationService";
 
 /**
- * Update quiz visibility
- * Sets the quiz to PRIVATE, FRIENDS, PUBLIC, or SPECIFIC
+ * Update user's default privacy setting
+ * This affects ALL of the user's content (quizzes, documents, etc.)
+ * Sets to PRIVATE, FRIENDS, or PUBLIC
  */
 export const updateQuizVisibility = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const { customQuizId, visibility } = await c.req.json();
+    const { visibility } = await c.req.json();
 
-    if (!customQuizId || !visibility) {
-      return c.json({ success: false, error: "Missing customQuizId or visibility" }, 400);
+    if (!visibility) {
+      return c.json({ success: false, error: "Missing visibility" }, 400);
     }
 
-    const validVisibility = ["PRIVATE", "FRIENDS", "PUBLIC", "SPECIFIC"];
+    const validVisibility = ["PRIVATE", "FRIENDS", "PUBLIC"];
     if (!validVisibility.includes(visibility)) {
-      return c.json({ success: false, error: "Invalid visibility value" }, 400);
+      return c.json({ success: false, error: "Invalid visibility value. Must be PRIVATE, FRIENDS, or PUBLIC" }, 400);
     }
 
+    // Update the user's default privacy setting
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { defaultPrivacy: visibility },
+    });
+
+    // If changing away from PRIVATE, optionally clear all specific shares for this user's quizzes
+    if (visibility !== "PRIVATE") {
+      const userQuizzes = await prisma.customQuiz.findMany({
+        where: { userId },
+        select: { id: true },
+      });
+
+      const quizIds = userQuizzes.map(q => q.id);
+
+      if (quizIds.length > 0) {
+        await prisma.customQuizShare.deleteMany({
+          where: { customQuizId: { in: quizIds } },
+        });
+      }
+    }
+
+    return c.json({ success: true, data: { defaultPrivacy: updatedUser.defaultPrivacy } });
+  } catch (error) {
+    console.error("Error updating user privacy:", error);
+    return c.json({ success: false, error: "Failed to update privacy setting" }, 500);
+  }
+};
+
+/**
+ * Request access to a quiz (creates a PENDING CustomQuizShare record)
+ * Sends a notification to the quiz owner
+ */
+export const requestQuizAccess = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+    const { customQuizId } = await c.req.json();
+
+    if (!customQuizId) {
+      return c.json({ success: false, error: "Missing customQuizId" }, 400);
+    }
+
+    const quiz = await prisma.customQuiz.findUnique({
+      where: { id: customQuizId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    if (!quiz) {
+      return c.json({ success: false, error: "Quiz not found" }, 404);
+    }
+
+    if (quiz.userId === userId) {
+      return c.json({ success: false, error: "You already own this quiz" }, 400);
+    }
+
+    // Check if they're friends (mutual follow)
+    const yourFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: userId,
+          followingId: quiz.userId,
+        },
+      },
+    });
+
+    const theirFollow = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: quiz.userId,
+          followingId: userId,
+        },
+      },
+    });
+
+    const areFriends =
+      yourFollow?.status === "FOLLOWING" &&
+      theirFollow?.status === "FOLLOWING";
+
+    if (!areFriends) {
+      return c.json({ success: false, error: "You can only request quizzes from friends" }, 403);
+    }
+
+    // Check if already shared or requested
+    const existingShare = await prisma.customQuizShare.findUnique({
+      where: {
+        customQuizId_sharedWithUserId: {
+          customQuizId,
+          sharedWithUserId: userId,
+        },
+      },
+    });
+
+    if (existingShare) {
+      if (existingShare.status === "ACCEPTED") {
+        return c.json({ success: false, error: "You already have access to this quiz" }, 400);
+      } else if (existingShare.status === "PENDING") {
+        return c.json({ success: false, error: "You already have a pending request for this quiz" }, 400);
+      }
+      // If DENIED, allow them to request again by updating the existing record
+    }
+
+    // Create or update the CustomQuizShare record with PENDING status
+    const share = await prisma.customQuizShare.upsert({
+      where: {
+        customQuizId_sharedWithUserId: {
+          customQuizId,
+          sharedWithUserId: userId,
+        },
+      },
+      create: {
+        customQuizId,
+        sharedWithUserId: userId,
+        status: "PENDING",
+      },
+      update: {
+        status: "PENDING",
+        updatedAt: new Date(),
+      },
+    });
+
+    // Create notification for the quiz owner
+    try {
+      const requesterName = user.firstName || user.username || "Someone";
+      console.log(`📬 Creating QUIZ_SHARED notification for owner ${quiz.userId} from ${userId} (${requesterName})`);
+
+      const notification = await createNotification({
+        userId: quiz.userId, // Notify the quiz owner
+        type: "QUIZ_SHARED",
+        title: "Lesson Access Requested",
+        message: `${requesterName} requested access to "${quiz.name}"`,
+        actionUrl: `/profile/friends/${userId}`, // Navigate to requester's friend profile to approve/deny
+      });
+
+      console.log(`✅ Successfully created notification:`, notification.id);
+    } catch (notifError) {
+      console.error("❌ Failed to create quiz access request notification:", notifError);
+      // Don't fail the whole process if notification fails
+    }
+
+    return c.json({
+      success: true,
+      message: "Access request sent to quiz owner",
+      data: share,
+    });
+  } catch (error) {
+    console.error("Error requesting quiz access:", error);
+    return c.json({ success: false, error: "Failed to request quiz access" }, 500);
+  }
+};
+
+/**
+ * Get pending quiz access requests for the current user's quizzes from a specific requester
+ * Returns quizzes that the requester has asked for (PENDING status)
+ */
+export const getPendingRequestsFromUser = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const requesterId = c.req.param("requesterId");
+
+    if (!requesterId) {
+      return c.json({ success: false, error: "Missing requesterId" }, 400);
+    }
+
+    // Get all PENDING quiz share requests from this requester for current user's quizzes
+    const pendingShares = await prisma.customQuizShare.findMany({
+      where: {
+        sharedWithUserId: requesterId,
+        status: "PENDING",
+        customQuiz: {
+          userId: currentUserId,
+        },
+      },
+      include: {
+        customQuiz: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        sharedAt: "desc",
+      },
+    });
+
+    const pendingRequests = pendingShares.map((share) => ({
+      quizId: share.customQuizId,
+      quizName: share.customQuiz.name,
+      requestedAt: share.sharedAt.toISOString(),
+    }));
+
+    console.log(`✅ Found ${pendingRequests.length} pending requests from ${requesterId}:`, pendingRequests);
+
+    return c.json({
+      success: true,
+      data: pendingRequests,
+    });
+  } catch (error) {
+    console.error("Error getting pending requests:", error);
+    return c.json({ success: false, error: "Failed to get pending requests" }, 500);
+  }
+};
+
+/**
+ * Get quiz IDs that the current user has requested access to from a specific owner
+ * Returns array of quiz IDs where the user has PENDING requests
+ */
+export const getMyRequestsToUser = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const ownerId = c.req.param("ownerId");
+
+    if (!ownerId) {
+      return c.json({ success: false, error: "Missing ownerId" }, 400);
+    }
+
+    // Get all PENDING quiz share requests from current user for owner's quizzes
+    const myPendingRequests = await prisma.customQuizShare.findMany({
+      where: {
+        sharedWithUserId: currentUserId,
+        status: "PENDING",
+        customQuiz: {
+          userId: ownerId,
+        },
+      },
+      select: {
+        customQuizId: true,
+      },
+    });
+
+    const requestedQuizIds = myPendingRequests.map((share) => share.customQuizId);
+
+    console.log(`✅ Found ${requestedQuizIds.length} pending requests from ${currentUserId} to ${ownerId}`);
+
+    return c.json({
+      success: true,
+      data: requestedQuizIds,
+    });
+  } catch (error) {
+    console.error("Error getting user's sent requests:", error);
+    return c.json({ success: false, error: "Failed to get sent requests" }, 500);
+  }
+};
+
+/**
+ * Deny a quiz access request
+ * Marks the related notifications as read to dismiss the request
+ */
+export const denyQuizAccess = async (c: Context) => {
+  try {
+    const currentUser = c.get("user");
+    const currentUserId = currentUser.id;
+    const { customQuizId, requesterId } = await c.req.json();
+
+    if (!customQuizId || !requesterId) {
+      return c.json({ success: false, error: "Missing customQuizId or requesterId" }, 400);
+    }
+
+    // Verify the quiz belongs to the current user
     const quiz = await prisma.customQuiz.findUnique({
       where: { id: customQuizId },
     });
@@ -29,26 +301,54 @@ export const updateQuizVisibility = async (c: Context) => {
       return c.json({ success: false, error: "Quiz not found" }, 404);
     }
 
-    if (quiz.userId !== userId) {
-      return c.json({ success: false, error: "You can only update your own quizzes" }, 403);
+    if (quiz.userId !== currentUserId) {
+      return c.json({ success: false, error: "You can only deny requests for your own quizzes" }, 403);
     }
 
-    const updatedQuiz = await prisma.customQuiz.update({
-      where: { id: customQuizId },
-      data: { visibility },
+    // Update the share status to DENIED
+    const share = await prisma.customQuizShare.updateMany({
+      where: {
+        customQuizId,
+        sharedWithUserId: requesterId,
+        status: "PENDING",
+      },
+      data: {
+        status: "DENIED",
+        updatedAt: new Date(),
+      },
     });
 
-    // If changing away from SPECIFIC, optionally clear specific shares
-    if (visibility !== "SPECIFIC" && quiz.visibility === "SPECIFIC") {
-      await prisma.customQuizShare.deleteMany({
-        where: { customQuizId },
+    // Mark related access request notifications as read (denied)
+    try {
+      await prisma.notification.updateMany({
+        where: {
+          userId: currentUserId,
+          type: "QUIZ_SHARED",
+          message: {
+            contains: `requested access to "${quiz.name}"`,
+          },
+          actionUrl: {
+            contains: requesterId,
+          },
+          isRead: false,
+        },
+        data: {
+          isRead: true,
+        },
       });
+      console.log(`✅ Marked access request notifications as read for quiz "${quiz.name}"`);
+    } catch (updateError) {
+      console.error("❌ Failed to mark notifications as read:", updateError);
+      // Don't fail the whole process
     }
 
-    return c.json({ success: true, data: updatedQuiz });
+    return c.json({
+      success: true,
+      message: "Access request denied",
+    });
   } catch (error) {
-    console.error("Error updating quiz visibility:", error);
-    return c.json({ success: false, error: "Failed to update quiz visibility" }, 500);
+    console.error("Error denying quiz access:", error);
+    return c.json({ success: false, error: "Failed to deny quiz access" }, 500);
   }
 };
 
@@ -78,13 +378,8 @@ export const shareQuizWithFriend = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    // Automatically set visibility to SPECIFIC if it's not already set
-    if (quiz.visibility !== "SPECIFIC") {
-      await prisma.customQuiz.update({
-        where: { id: customQuizId },
-        data: { visibility: "SPECIFIC" },
-      });
-    }
+    // No need to change visibility - PRIVATE quizzes use CustomQuizShare for access control
+    // FRIENDS/PUBLIC quizzes can also have specific shares for additional access
 
     // Check if they're friends (mutual follow)
     const yourFollow = await prisma.follow.findUnique({
@@ -113,6 +408,7 @@ export const shareQuizWithFriend = async (c: Context) => {
       return c.json({ success: false, error: "You can only share quizzes with friends" }, 403);
     }
 
+    // Check if there's an existing share record
     const existingShare = await prisma.customQuizShare.findUnique({
       where: {
         customQuizId_sharedWithUserId: {
@@ -122,14 +418,26 @@ export const shareQuizWithFriend = async (c: Context) => {
       },
     });
 
-    if (existingShare) {
+    if (existingShare && existingShare.status === "ACCEPTED") {
       return c.json({ success: false, error: "Quiz already shared with this user" }, 400);
     }
 
-    const share = await prisma.customQuizShare.create({
-      data: {
+    // Create new share or update existing PENDING/DENIED to ACCEPTED
+    const share = await prisma.customQuizShare.upsert({
+      where: {
+        customQuizId_sharedWithUserId: {
+          customQuizId,
+          sharedWithUserId: friendUserId,
+        },
+      },
+      create: {
         customQuizId,
         sharedWithUserId: friendUserId,
+        status: "ACCEPTED",
+      },
+      update: {
+        status: "ACCEPTED",
+        updatedAt: new Date(),
       },
       include: {
         sharedWith: {
@@ -143,11 +451,35 @@ export const shareQuizWithFriend = async (c: Context) => {
       },
     });
 
+    // Mark related access request notifications as read (approved)
+    try {
+      await prisma.notification.updateMany({
+        where: {
+          userId: userId, // Current user (quiz owner)
+          type: "QUIZ_SHARED",
+          message: {
+            contains: `requested access to "${quiz.name}"`,
+          },
+          actionUrl: {
+            contains: friendUserId,
+          },
+          isRead: false,
+        },
+        data: {
+          isRead: true,
+        },
+      });
+      console.log(`✅ Marked access request notifications as read for quiz "${quiz.name}"`);
+    } catch (updateError) {
+      console.error("❌ Failed to mark notifications as read:", updateError);
+      // Don't fail the whole process
+    }
+
     // Create notification for the friend
     try {
       const sharerName = user.firstName || user.username || "Someone";
       console.log(`📬 Attempting to create QUIZ_SHARED notification for user ${friendUserId} from ${userId} (${sharerName})`);
-      
+
       const notification = await createNotification({
         userId: friendUserId, // Notify the friend receiving the share
         type: "QUIZ_SHARED" as any, // Will work at runtime after Prisma regeneration
@@ -155,7 +487,7 @@ export const shareQuizWithFriend = async (c: Context) => {
         message: `${sharerName} shared a lesson with you`,
         actionUrl: "/learning/shared",
       });
-      
+
       console.log(`✅ Successfully created notification:`, notification.id);
     } catch (notifError) {
       console.error("❌ Failed to create quiz share notification:", notifError);
@@ -177,7 +509,7 @@ export const unshareQuiz = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
-    const shareId = c.req.param("id");
+    const shareId = c.req.param("shareId") || c.req.param("id");
 
     const share = await prisma.customQuizShare.findUnique({
       where: { id: shareId },
@@ -207,6 +539,7 @@ export const unshareQuiz = async (c: Context) => {
 
 /**
  * Get all specific shares for a quiz
+ * Returns the quiz owner's privacy setting and explicit shares
  */
 export const getQuizShares = async (c: Context) => {
   try {
@@ -216,6 +549,13 @@ export const getQuizShares = async (c: Context) => {
 
     const quiz = await prisma.customQuiz.findUnique({
       where: { id: customQuizId },
+      include: {
+        user: {
+          select: {
+            defaultPrivacy: true,
+          },
+        },
+      },
     });
 
     if (!quiz) {
@@ -247,7 +587,7 @@ export const getQuizShares = async (c: Context) => {
     return c.json({
       success: true,
       data: {
-        visibility: quiz.visibility,
+        visibility: quiz.user.defaultPrivacy,
         shares,
       }
     });
@@ -289,23 +629,35 @@ export const getSharedWithMe = async (c: Context) => {
     const friendIds = theirFollows.map((f) => f.followerId);
 
     // Get quizzes:
-    // 1. PUBLIC quizzes (not mine)
-    // 2. FRIENDS quizzes from my friends
-    // 3. SPECIFIC quizzes explicitly shared with me
+    // 1. PUBLIC quizzes (not mine) - owner's defaultPrivacy is PUBLIC
+    // 2. FRIENDS quizzes from my friends - owner's defaultPrivacy is FRIENDS
+    // 3. PRIVATE quizzes explicitly shared with me via CustomQuizShare
     const quizzes = await prisma.customQuiz.findMany({
       where: {
         userId: { not: userId },
         OR: [
-          { visibility: "PUBLIC" },
+          // PUBLIC quizzes from anyone
           {
-            visibility: "FRIENDS",
+            user: {
+              defaultPrivacy: "PUBLIC"
+            }
+          },
+          // FRIENDS quizzes from my friends
+          {
+            user: {
+              defaultPrivacy: "FRIENDS"
+            },
             userId: { in: friendIds },
           },
+          // PRIVATE quizzes explicitly shared with me (ACCEPTED status only)
           {
-            visibility: "SPECIFIC",
+            user: {
+              defaultPrivacy: "PRIVATE"
+            },
             sharedWith: {
               some: {
                 sharedWithUserId: userId,
+                status: "ACCEPTED",
               },
             },
           },
@@ -318,6 +670,7 @@ export const getSharedWithMe = async (c: Context) => {
             username: true,
             firstName: true,
             lastName: true,
+            defaultPrivacy: true,
           },
         },
         category: {
@@ -450,13 +803,8 @@ export const shareWithMultipleFriends = async (c: Context) => {
       return c.json({ success: false, error: "You can only share your own quizzes" }, 403);
     }
 
-    // Automatically set visibility to SPECIFIC if it's not already set
-    if (quiz.visibility !== "SPECIFIC") {
-      await prisma.customQuiz.update({
-        where: { id: customQuizId },
-        data: { visibility: "SPECIFIC" },
-      });
-    }
+    // No need to change visibility - PRIVATE quizzes use CustomQuizShare for access control
+    // FRIENDS/PUBLIC quizzes can also have specific shares for additional access
 
     // Get mutual friends
     const myFollowing = await prisma.follow.findMany({
@@ -588,38 +936,44 @@ export const getUserSharedQuizzes = async (c: Context) => {
       yourFollow?.status === "FOLLOWING" &&
       theirFollow?.status === "FOLLOWING";
 
-    // Check if user has lesson request access
-    const lessonRequest = await prisma.lessonRequest.findUnique({
-      where: {
-        requesterId_recipientId: {
-          requesterId: currentUserId,
-          recipientId: targetUserId,
-        },
-      },
+    // Get the target user's privacy setting
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { defaultPrivacy: true },
     });
 
-    const hasLessonAccess = lessonRequest?.status === "ACCEPTED";
+    if (!targetUser) {
+      return c.json({ success: false, error: "Target user not found" }, 404);
+    }
 
-    // If user has lesson access, return ALL quizzes regardless of visibility
-    // Otherwise, build query conditions based on friendship status
+    // Build query conditions based on friendship status and user's privacy setting
     let whereCondition: any;
 
-    if (hasLessonAccess) {
-      // Return all quizzes when lesson request is accepted
+    // Build query conditions based on user's privacy setting and friendship status
+    const privacy = targetUser.defaultPrivacy;
+
+    if (privacy === "PUBLIC") {
+      // PUBLIC: Everyone can see
+      whereCondition = { userId: targetUserId };
+    } else if (privacy === "FRIENDS" && areFriends) {
+      // FRIENDS: Only friends can see, and we are friends
+      whereCondition = { userId: targetUserId };
+    } else if (privacy === "PRIVATE") {
+      // PRIVATE: Only explicitly shared quizzes with ACCEPTED status
       whereCondition = {
         userId: targetUserId,
+        sharedWith: {
+          some: {
+            sharedWithUserId: currentUserId,
+            status: "ACCEPTED",
+          },
+        },
       };
     } else {
-      // Build query conditions based on friendship status
-      const visibilityConditions: any[] = [{ visibility: "PUBLIC" }];
-
-      if (areFriends) {
-        visibilityConditions.push({ visibility: "FRIENDS" });
-      }
-
+      // No access (either FRIENDS and not friends, or invalid state)
       whereCondition = {
         userId: targetUserId,
-        OR: visibilityConditions,
+        id: "impossible-to-match", // Return empty result
       };
     }
 
@@ -633,6 +987,7 @@ export const getUserSharedQuizzes = async (c: Context) => {
             username: true,
             firstName: true,
             lastName: true,
+            defaultPrivacy: true,
           },
         },
         category: {
@@ -680,6 +1035,7 @@ export const getUserSharedQuizzes = async (c: Context) => {
 /**
  * Check if user can access a quiz
  * Helper function used by quiz controller
+ * Now reads visibility from the quiz owner's User.defaultPrivacy setting
  */
 export async function canAccessQuiz(userId: string, quiz: any): Promise<boolean> {
   // Owner can always access
@@ -687,8 +1043,18 @@ export async function canAccessQuiz(userId: string, quiz: any): Promise<boolean>
     return true;
   }
 
-  // Check based on visibility
-  switch (quiz.visibility) {
+  // Get the quiz owner's privacy settings
+  const quizOwner = await prisma.user.findUnique({
+    where: { id: quiz.userId },
+    select: { defaultPrivacy: true },
+  });
+
+  if (!quizOwner) {
+    return false;
+  }
+
+  // Check based on owner's default privacy setting
+  switch (quizOwner.defaultPrivacy) {
     case "PUBLIC":
       return true;
 
@@ -718,8 +1084,8 @@ export async function canAccessQuiz(userId: string, quiz: any): Promise<boolean>
       );
     }
 
-    case "SPECIFIC": {
-      // Check if specifically shared with this user
+    case "PRIVATE": {
+      // Check if specifically shared with this user via CustomQuizShare table with ACCEPTED status
       const share = await prisma.customQuizShare.findUnique({
         where: {
           customQuizId_sharedWithUserId: {
@@ -729,10 +1095,9 @@ export async function canAccessQuiz(userId: string, quiz: any): Promise<boolean>
         },
       });
 
-      return !!share;
+      return share?.status === "ACCEPTED";
     }
 
-    case "PRIVATE":
     default:
       return false;
   }

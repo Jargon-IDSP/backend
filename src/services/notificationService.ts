@@ -128,6 +128,25 @@ export async function deleteNotification(notificationId: string, userId: string)
 }
 
 /**
+ * Clear all notifications for a user
+ */
+export async function clearAllNotifications(userId: string) {
+  try {
+    const result = await prisma.notification.deleteMany({
+      where: {
+        userId,
+      },
+    });
+
+    console.log(`🗑️ Cleared ${result.count} notifications for user ${userId}`);
+    return result;
+  } catch (error) {
+    console.error("Error clearing all notifications:", error);
+    throw error;
+  }
+}
+
+/**
  * Delete old notifications (older than 30 days)
  */
 export async function cleanupOldNotifications() {

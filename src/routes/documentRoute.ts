@@ -6,6 +6,7 @@ import {
   getUserDocuments,
   getDocument,
   getDownloadUrl,
+  updateDocument,
   deleteDocument,
   triggerOCR,
   getDocumentStatus,
@@ -25,6 +26,7 @@ export const documentRoute = new Hono()
   .get("/:id/translation", getDocumentTranslation)
   .get("/:id/download", getDownloadUrl)
   .get("/:id", getDocument)
+  .patch("/:id", updateDocument)
   .delete("/:id", deleteDocument)
   .post("/:id/finalize", finalizeDocument)
 

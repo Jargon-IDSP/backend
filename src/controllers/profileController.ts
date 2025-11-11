@@ -19,6 +19,7 @@ export const profile = async (c: Context) => {
       introductionViewed: true,
       onboardingCompleted: true,
       score: true,
+      defaultPrivacy: true,
       createdAt: true,
       updatedAt: true,
     }
@@ -65,7 +66,7 @@ export const updateOnboarding = async (c: Context) => {
       }
     }
 
-    // Update user preferences
+    // Update user preferences and initialize apprenticeship progress
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -85,6 +86,33 @@ export const updateOnboarding = async (c: Context) => {
         score: true,
       }
     });
+
+    // Initialize apprenticeship progress for Foundation level (level 1) if industry was selected
+    if (industryId !== null) {
+      // Check if progress record already exists
+      const existingProgress = await prisma.userApprenticeshipProgress.findUnique({
+        where: {
+          userId_levelId_industryId: {
+            userId: user.id,
+            levelId: 1,
+            industryId: industryId,
+          },
+        },
+      });
+
+      // Only create if it doesn't exist
+      if (!existingProgress) {
+        await prisma.userApprenticeshipProgress.create({
+          data: {
+            userId: user.id,
+            levelId: 1, // Foundation level
+            industryId: industryId,
+            quizzesCompleted: 0,
+            isLevelComplete: false,
+          },
+        });
+      }
+    }
 
     return c.json({
       message: "Onboarding preferences updated successfully",

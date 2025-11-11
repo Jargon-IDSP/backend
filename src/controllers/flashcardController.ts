@@ -410,19 +410,21 @@ export const getIndustries = async (c: Context) => {
 export const getLevels = async (c: Context) => {
   try {
     const { levelId } = extractRouteParams(c);
-    const { language, industryId } = extractQueryParams(c);
-    const userId = c.get("userId");
+    const { language } = extractQueryParams(c);
+    const user = c.get("user");
+    const userId = user?.id;
 
-    // Check cache first (user-specific now)
-    const cacheKey = `levels:${levelId || "all"}:${language || "en"}:${
-      industryId || "all"
-    }:${userId}`;
-    const cached = await getFromCache<any>(cacheKey);
-    if (cached) {
-      return c.json(cached);
-    }
+    // Get user's full profile to access their industryId
+    const userProfile = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { industryId: true },
+    });
 
-    const parsedIndustryId = industryId ? parseInt(industryId) : null;
+    // Use the user's industryId from their profile (now required, defaults to 6 for General)
+    const userIndustryId = userProfile?.industryId;
+
+    // Don't cache - always fetch fresh data to ensure accurate level accessibility
+    // This is especially important after completing quizzes to immediately unlock next level
     const levelWhere = buildWhereClause({ levelId });
 
     const levels = await prisma.level.findMany({
@@ -445,25 +447,16 @@ export const getLevels = async (c: Context) => {
       );
     }
 
-    // Get user's completed levels (at least 70% correct)
-    const completedLevels = await prisma.userQuizAttempt.findMany({
-      where: {
-        userId,
-        levelId: { in: levels.map(l => l.id) },
-        completed: true,
-        percentCorrect: { gte: 70 }, // Must get 70% or higher
-      },
-      select: {
-        levelId: true,
-      },
-      distinct: ['levelId'],
-    });
-
-    const completedLevelIds = new Set(completedLevels.map(l => l.levelId));
+    // Get user's apprenticeship progress using helper function
+    const { getUserLevelProgress, isLevelAccessible } = await import("./helperFunctions/levelHelper");
+    const progressMap = await getUserLevelProgress(userId, userIndustryId);
 
     const levelsWithCounts = await Promise.all(
       levels.map(async (level: LevelData) => {
-        const terms = await calculateAvailableTerms(level.id, parsedIndustryId);
+        const terms = await calculateAvailableTerms(level.id, userIndustryId);
+
+        // Use helper function to determine accessibility
+        const accessibility = isLevelAccessible(level.id, progressMap);
 
         return {
           ...level,
@@ -471,7 +464,10 @@ export const getLevels = async (c: Context) => {
           industry_terms: terms.industryCount,
           general_terms: terms.generalCount,
           total_general_terms: terms.totalGeneralCount,
-          completed: completedLevelIds.has(level.id),
+          completed: accessibility.isCompleted,
+          unlocked: accessibility.isAccessible,
+          quizzesCompleted: accessibility.quizzesCompleted,
+          lockedReason: accessibility.lockedReason,
         };
       })
     );
@@ -480,12 +476,9 @@ export const getLevels = async (c: Context) => {
       levelId ? levelsWithCounts[0] : levelsWithCounts,
       {
         count: levelsWithCounts.length,
-        filters: { language, industry_id: industryId },
+        filters: { language, industry_id: userIndustryId },
       }
     );
-
-    // Cache for 5 minutes (user progress can change)
-    await setCache(cacheKey, response, 300);
 
     return c.json(response);
   } catch (error: any) {

@@ -241,6 +241,42 @@ export async function getBadges(c: Context) {
 }
 
 /**
+ * GET /api/prebuilt-quizzes/users/:userId/badges
+ * Get badges for a specific user (for viewing other users' profiles)
+ */
+export async function getUserBadgesById(c: Context) {
+  const targetUserId = c.req.param("userId");
+  const currentUserId = c.get("user")?.id;
+
+  if (!currentUserId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  if (!targetUserId) {
+    return c.json({ error: "User ID required" }, 400);
+  }
+
+  try {
+    const cacheKey = `prebuilt:badges:${targetUserId}`;
+    const cached = await getFromCache<any[]>(cacheKey);
+
+    if (cached) {
+      return c.json({ badges: cached }, 200);
+    }
+
+    const badges = await getUserBadges(targetUserId);
+
+    // Cache for 5 minutes
+    await setCache(cacheKey, badges, 300);
+
+    return c.json({ badges }, 200);
+  } catch (error) {
+    console.error("Error fetching user badges:", error);
+    return c.json({ error: "Failed to fetch user badges" }, 500);
+  }
+}
+
+/**
  * GET /api/prebuilt-quizzes/:prebuiltQuizId/attempt
  * Get user's latest attempt for a specific prebuilt quiz
  */

@@ -6,6 +6,7 @@ import {
   recordPrebuiltAnswer,
   getApprenticeshipProgress,
   getBadges,
+  getUserBadgesById,
   getPrebuiltQuizAttempt,
   getPrebuiltQuizQuestions,
   getAvailableBadges,
@@ -37,6 +38,9 @@ prebuiltQuizRoute.get('/progress', getApprenticeshipProgress);
 
 // Get user's earned badges
 prebuiltQuizRoute.get('/badges', getBadges);
+
+// Get badges for a specific user
+prebuiltQuizRoute.get('/users/:userId/badges', getUserBadgesById);
 
 // Get all available badges
 prebuiltQuizRoute.get('/available-badges', getAvailableBadges);

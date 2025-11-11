@@ -217,6 +217,25 @@ export async function startPrebuiltQuizAttempt(
 
   if (!quiz) throw new Error("Prebuilt quiz not found");
 
+  // Check prerequisites for boss quiz (quiz 3)
+  if (quiz.quizNumber === 3) {
+    // Boss quiz requires completing quizzes 1 and 2 first
+    const progress = await prisma.userApprenticeshipProgress.findUnique({
+      where: {
+        userId_levelId_industryId: {
+          userId,
+          levelId: quiz.levelId,
+          industryId: quiz.industryId || null,
+        },
+      },
+    });
+
+    // User must have completed at least 2 quizzes before attempting boss quiz
+    if (!progress || progress.quizzesCompleted < 2) {
+      throw new Error("You must complete quizzes 1 and 2 before attempting the challenge quiz");
+    }
+  }
+
   // Generate questions for this attempt
   const questionIds = await generatePrebuiltQuizQuestions(prebuiltQuizId);
 
@@ -253,7 +272,7 @@ export async function recordPrebuiltQuizAnswer(
 ): Promise<{ isCorrect: boolean; pointsEarned: number }> {
   // Check if this is a flashcard-based question or a regular question
   let isCorrect = false;
-  let pointsPerQuestion = 5;
+  let pointsPerQuestion = 10;
 
   const attempt = await prisma.userQuizAttempt.findUnique({
     where: { id: attemptId },
@@ -382,6 +401,12 @@ async function awardBadgesForCompletion(
   quizType: string,
   passed: boolean
 ): Promise<void> {
+  // Only count quiz as completed if user passed (or there's no passing requirement)
+  if (!passed) {
+    console.log(`User ${userId} did not pass quiz ${quizNumber} for level ${levelId}, not counting towards progress`);
+    return;
+  }
+
   // Update apprenticeship progress
   const progress = await prisma.userApprenticeshipProgress.upsert({
     where: {
@@ -405,56 +430,11 @@ async function awardBadgesForCompletion(
     },
   });
 
-  // Check if this is the first quiz - award "First Steps" badge
-  const totalCompletedQuizzes = await prisma.userQuizAttempt.count({
-    where: {
-      userId,
-      completed: true,
-    },
-  });
+  // Badge awarding is now only for level completion
+  // "First Steps" and "Boss Slayer" badges have been removed from the system
 
-  if (totalCompletedQuizzes === 1) {
-    const firstQuizBadge = await prisma.badge.findUnique({
-      where: { code: 'first-quiz' },
-    });
-
-    if (firstQuizBadge) {
-      await prisma.userBadge.create({
-        data: {
-          userId,
-          badgeId: firstQuizBadge.id,
-        },
-      }).catch(() => {}); // Ignore if already exists
-    }
-  }
-
-  // Check if this is a boss quiz - award "Boss Slayer" badge
-  if (quizType === 'BOSS_QUIZ' && passed) {
-    const bossQuizBadge = await prisma.badge.findUnique({
-      where: { code: 'boss-slayer' },
-    });
-
-    if (bossQuizBadge) {
-      const existingBossSlayer = await prisma.userBadge.findFirst({
-        where: {
-          userId,
-          badgeId: bossQuizBadge.id,
-        },
-      });
-
-      if (!existingBossSlayer) {
-        await prisma.userBadge.create({
-          data: {
-            userId,
-            badgeId: bossQuizBadge.id,
-          },
-        });
-      }
-    }
-  }
-
-  // Check if level is complete (5 quizzes completed)
-  if (progress.quizzesCompleted >= 5 && !progress.isLevelComplete) {
+  // Check if level is complete (3 quizzes completed - boss quiz is quiz 3)
+  if (progress.quizzesCompleted >= 3 && !progress.isLevelComplete) {
     await prisma.userApprenticeshipProgress.update({
       where: {
         userId_levelId_industryId: {
@@ -478,18 +458,19 @@ async function awardBadgesForCompletion(
           badgeId: levelBadge.id,
         },
       }).catch(() => {}); // Ignore if already exists
+
+      // Invalidate badge cache so new badge shows up immediately
+      const { invalidateCachePattern } = await import("../../lib/redis");
+      await invalidateCachePattern(`prebuilt:badges:${userId}`);
+      console.log(`🏆 Badge awarded: ${levelBadge.name}`);
     }
+
+    // No need to invalidate levels cache - levels endpoint doesn't cache anymore
+    // Next level will unlock immediately on next fetch since backend calculates accessibility in real-time
+    console.log(`✨ Level ${levelId} completed! Next level will be accessible immediately.`);
   }
 
-  // Check points milestones
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { score: true },
-  });
-
-  if (user) {
-    await awardPointsMilestoneBadges(userId, user.score);
-  }
+  // Points milestone badges have been removed
 }
 
 /**
@@ -501,50 +482,10 @@ async function findLevelCompletionBadge(
 ): Promise<any> {
   return await prisma.badge.findFirst({
     where: {
-      category: 'LEVEL_COMPLETION',
       levelId,
       industryId: industryId || null,
     },
   });
-}
-
-/**
- * Award points milestone badges
- */
-async function awardPointsMilestoneBadges(
-  userId: string,
-  currentScore: number
-): Promise<void> {
-  const milestones = [100, 250, 500, 1000, 2500, 5000];
-
-  for (const milestone of milestones) {
-    if (currentScore >= milestone) {
-      const badge = await prisma.badge.findFirst({
-        where: {
-          category: 'POINTS_MILESTONE',
-          requiresPoints: milestone,
-        },
-      });
-
-      if (badge) {
-        const existing = await prisma.userBadge.findFirst({
-          where: {
-            userId,
-            badgeId: badge.id,
-          },
-        });
-
-        if (!existing) {
-          await prisma.userBadge.create({
-            data: {
-              userId,
-              badgeId: badge.id,
-            },
-          });
-        }
-      }
-    }
-  }
 }
 
 /**

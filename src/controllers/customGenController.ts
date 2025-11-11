@@ -71,12 +71,25 @@ export const generateCustomForDocument = async (c: Context) => {
       existingDbTermsEnglish,
     });
 
+    // Get user's default privacy setting
+    const userData = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { defaultPrivacy: true },
+    });
+
+    // Use user's default privacy directly
+    // PRIVATE -> use CustomQuizShare table for access control (checkboxes)
+    // FRIENDS -> all mutual friends can see
+    // PUBLIC -> everyone can see
+    const quizVisibility = userData?.defaultPrivacy || "PRIVATE";
+
     const quizData = {
       id: crypto.randomUUID(),
       userId: user.id,
       documentId: doc.id,
       name: doc.filename,
       categoryId: categoryId,
+      visibility: quizVisibility,
       pointsPerQuestion: 10,
       createdAt: new Date(),
       updatedAt: new Date(),

@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { flashcardJson, LevelData, IndustryData } from '../interfaces/flashcardData'
 
-const dataDirectory = '../backend/jargon-terms'
+const dataDirectory = './jargon-terms'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
@@ -136,20 +136,8 @@ if (invalidLevel.length > 0) {
   })
 }
 
-    console.log('Clearing existing data...')
-    await prisma.question.deleteMany()
+    console.log('Clearing existing flashcards...')
     await prisma.flashcard.deleteMany()
-    await prisma.industry.deleteMany()
-    await prisma.level.deleteMany()
-    
-    console.log('Creating levels and industries...')
-    for (const level of levelsData) {
-      await prisma.level.create({ data: { id: level.id, name: level.name } })
-    }
-    
-    for (const industry of industriesData) {
-      await prisma.industry.create({ data: { id: industry.id, name: industry.name } })
-    }
     
     console.log('Importing flashcards...')
     const dbData = flashcardsData.map(transformForDB)

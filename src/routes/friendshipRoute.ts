@@ -178,7 +178,7 @@ friendshipRoute.get("/", async (c: Context) => {
 
   const mutualIds = new Set(mutualFollows.map((f) => f.followerId));
 
-  // Format response to match frontend expectations
+  // Format response with FOLLOWING status
   const friends = following.map((follow) => {
     const isMutual = mutualIds.has(follow.followingId);
     return {
@@ -190,7 +190,8 @@ friendshipRoute.get("/", async (c: Context) => {
       score: follow.following.score,
       industryId: follow.following.industryId,
       friendshipId: follow.id,
-      status: isMutual ? "ACCEPTED" : "PENDING", // Map to old status for frontend
+      status: "FOLLOWING", // Always FOLLOWING since we're filtering for that status
+      isMutual, // Add flag to indicate if it's mutual (friends)
       followedAt: follow.createdAt,
     };
   });

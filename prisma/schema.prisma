@@ -12,11 +12,10 @@ enum FollowStatus {
   BLOCKED
 }
 
-enum QuizVisibility {
-  PRIVATE        // Only owner
-  FRIENDS        // All friends (mutual follows)
-  PUBLIC         // Everyone
-  SPECIFIC       // Specific users via CustomQuizShare table
+enum PrivacyVisibility {
+  PRIVATE // Only owner, can individually share via CustomQuizShare
+  FRIENDS // All friends (mutual follows)
+  PUBLIC // Everyone
 }
 
 enum QuizType {
@@ -26,18 +25,10 @@ enum QuizType {
   BOSS_QUIZ
 }
 
-enum BadgeCategory {
-  QUIZ_COMPLETION
-  LEVEL_COMPLETION
-  STREAK
-  POINTS_MILESTONE
-  SPECIAL
-}
-
 model Category {
   id        Int     @id @default(autoincrement())
   name      String
-  userId    String?  // Null for default categories, set for custom categories
+  userId    String? // Null for default categories, set for custom categories
   isDefault Boolean @default(false)
 
   user             User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -46,7 +37,7 @@ model Category {
   customQuestions  CustomQuestion[]
   customQuizzes    CustomQuiz[]
 
-  @@unique([name, userId])  // Name must be unique per user, or unique for defaults (userId = null)
+  @@unique([name, userId]) // Name must be unique per user, or unique for defaults (userId = null)
   @@index([userId])
   @@index([isDefault])
   @@index([userId, isDefault])
@@ -57,10 +48,10 @@ model Industry {
   id   Int    @id @default(autoincrement())
   name String @unique
 
-  flashcards    Flashcard[]
-  users         User[]
-  prebuiltQuizzes PrebuiltQuiz[]
-  badges        Badge[]
+  flashcards             Flashcard[]
+  users                  User[]
+  prebuiltQuizzes        PrebuiltQuiz[]
+  badges                 Badge[]
   apprenticeshipProgress UserApprenticeshipProgress[]
 
   @@map("industries")
@@ -130,8 +121,8 @@ model Question {
 }
 
 model PrebuiltQuiz {
-  id        String   @id @default(cuid())
-  templateId String  @unique
+  id         String @id @default(cuid())
+  templateId String @unique
 
   levelId    Int
   industryId Int?
@@ -140,13 +131,13 @@ model PrebuiltQuiz {
   name        String  @db.Text
   description String? @db.Text
 
-  quizType      QuizType
+  quizType QuizType
 
   questionsPerQuiz    Int     @default(10)
   allowAIHelp         Boolean @default(true)
   allowTranslation    Boolean @default(true)
   allowBackNavigation Boolean @default(true)
-  pointsPerQuestion   Int     @default(5)
+  pointsPerQuestion   Int     @default(10)
   requiredToUnlock    Boolean @default(false)
   passingScore        Int?
 
@@ -164,27 +155,22 @@ model PrebuiltQuiz {
 }
 
 model Badge {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id   String @id @default(cuid())
+  code String @unique
 
   name        String @db.Text
   description String @db.Text
 
-  iconUrl     String?
-  category    BadgeCategory
+  iconUrl String?
 
-  levelId      Int?
-  industryId   Int?
+  levelId    Int?
+  industryId Int?
 
-  requiresQuizCount  Int?
-  requiresPoints     Int?
-
-  level    Level?     @relation(fields: [levelId], references: [id])
-  industry Industry?  @relation(fields: [industryId], references: [id])
+  level    Level?    @relation(fields: [levelId], references: [id])
+  industry Industry? @relation(fields: [industryId], references: [id])
 
   userBadges UserBadge[]
 
-  @@index([category])
   @@index([levelId])
   @@index([industryId])
   @@index([levelId, industryId])
@@ -208,20 +194,20 @@ model UserBadge {
 }
 
 model UserApprenticeshipProgress {
-  id       String   @id @default(cuid())
-  userId   String
-  levelId  Int
-  industryId Int?
+  id         String @id @default(cuid())
+  userId     String
+  levelId    Int
+  industryId Int    @default(6) // Default to "general" industry
 
   quizzesCompleted Int     @default(0)
   isLevelComplete  Boolean @default(false)
 
-  unlockedAt   DateTime  @default(now())
-  completedAt  DateTime?
+  unlockedAt  DateTime  @default(now())
+  completedAt DateTime?
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  level    Level     @relation(fields: [levelId], references: [id])
-  industry Industry? @relation(fields: [industryId], references: [id])
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level    Level    @relation(fields: [levelId], references: [id])
+  industry Industry @relation(fields: [industryId], references: [id])
 
   @@unique([userId, levelId, industryId])
   @@index([userId])
@@ -304,7 +290,6 @@ model CustomFlashcard {
   document          Document?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   questions         CustomQuestion[] @relation("CustomQuestionCorrectAnswer")
-  userAnswers       UserQuizAnswer[] @relation("UserQuizAnswers")
 
   @@index([userId, createdAt])
   @@index([documentId, createdAt])
@@ -332,7 +317,6 @@ model CustomQuestion {
   correctAnswer CustomFlashcard  @relation("CustomQuestionCorrectAnswer", fields: [correctTermId], references: [id], onDelete: Cascade)
   customQuiz    CustomQuiz?      @relation(fields: [customQuizId], references: [id])
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userAnswers   UserQuizAnswer[]
 
   @@index([userId, createdAt])
   @@index([customQuizId, createdAt])
@@ -347,10 +331,9 @@ model CustomQuiz {
   userId     String
   documentId String?
   name       String
-  categoryId Int      @default(6) // Default to General category
+  categoryId Int     @default(6) // Default to General category
 
-  visibility        QuizVisibility @default(PRIVATE)
-  pointsPerQuestion Int            @default(10)
+  pointsPerQuestion Int @default(10)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -365,24 +348,26 @@ model CustomQuiz {
   @@index([userId])
   @@index([categoryId])
   @@index([documentId])
-  @@index([visibility])
   @@index([userId, createdAt])
   @@index([userId, categoryId])
-  @@index([userId, visibility])
   @@map("custom_quizzes")
 }
 
 model CustomQuizShare {
-  id               String     @id @default(cuid())
+  id               String              @id @default(cuid())
   customQuizId     String
   sharedWithUserId String
-  sharedAt         DateTime   @default(now())
-  customQuiz       CustomQuiz @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
-  sharedWith       User       @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  status           LessonRequestStatus @default(PENDING)
+  sharedAt         DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  customQuiz       CustomQuiz          @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
+  sharedWith       User                @relation("SharedCustomQuizzes", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
 
   @@unique([customQuizId, sharedWithUserId])
   @@index([customQuizId])
   @@index([sharedWithUserId])
+  @@index([status])
+  @@index([customQuizId, status])
   @@map("custom_quiz_shares")
 }
 
@@ -396,27 +381,24 @@ model UserQuizAttempt {
 
   questionIds String? @db.Text
 
-  questionsAnswered   Int @default(0)
-  questionsCorrect    Int @default(0)
-  totalQuestions      Int
+  questionsAnswered Int @default(0)
+  questionsCorrect  Int @default(0)
+  totalQuestions    Int
 
-  percentComplete     Int @default(0)
-  percentCorrect      Int @default(0)
+  percentComplete Int @default(0)
+  percentCorrect  Int @default(0)
 
-  pointsEarned        Int @default(0)
-  maxPossiblePoints   Int
+  pointsEarned      Int @default(0)
+  maxPossiblePoints Int
 
-  completed   Boolean  @default(false)
-  startedAt   DateTime @default(now())
+  completed   Boolean   @default(false)
+  startedAt   DateTime  @default(now())
   completedAt DateTime?
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   customQuiz   CustomQuiz?   @relation(fields: [customQuizId], references: [id], onDelete: Cascade)
   prebuiltQuiz PrebuiltQuiz? @relation(fields: [prebuiltQuizId], references: [id], onDelete: Cascade)
   level        Level?        @relation(fields: [levelId], references: [id], onDelete: SetNull)
-
-  customAnswers    UserQuizAnswer[]
-  prebuiltAnswers  PrebuiltQuizAnswer[]
 
   @@index([userId])
   @@index([customQuizId])
@@ -429,50 +411,6 @@ model UserQuizAttempt {
   @@index([userId, levelId])
   @@index([userId, completedAt])
   @@map("user_quiz_attempts")
-}
-
-model UserQuizAnswer {
-  id String @id @default(cuid())
-
-  attemptId  String
-  questionId String
-  answerId   String
-
-  isCorrect    Boolean
-  pointsEarned Int @default(0)
-
-  answeredAt DateTime @default(now())
-
-  attempt  UserQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  question CustomQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  answer   CustomFlashcard @relation("UserQuizAnswers", fields: [answerId], references: [id], onDelete: Cascade)
-
-  @@unique([attemptId, questionId])
-  @@index([attemptId])
-  @@index([questionId])
-  @@index([answerId], map: "user_quiz_answers_answerId_fkey")
-  @@map("user_quiz_answers")
-}
-
-model PrebuiltQuizAnswer {
-  id String @id @default(cuid())
-
-  attemptId  String
-  questionId String
-  answerId   String
-
-  isCorrect    Boolean
-  pointsEarned Int @default(0)
-
-  answeredAt DateTime @default(now())
-
-  attempt UserQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-
-  @@unique([attemptId, questionId])
-  @@index([attemptId])
-  @@index([questionId])
-  @@index([answerId])
-  @@map("prebuilt_quiz_answers")
 }
 
 model UserWeeklyStats {
@@ -493,40 +431,38 @@ model UserWeeklyStats {
 }
 
 model User {
-  id                   String                @id
-  email                String
-  firstName            String?
-  lastName             String?
-  username             String?
-  language             String                @default("english")
-  industryId           Int?
-  onboardingCompleted  Boolean               @default(false)
-  introductionViewed   Boolean               @default(false)
-  score                Int                   @default(0)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
+  id                  String            @id
+  email               String
+  firstName           String?
+  lastName            String?
+  username            String?
+  language            String            @default("english")
+  industryId          Int               @default(6) // Default to "general" industry
+  onboardingCompleted Boolean           @default(false)
+  introductionViewed  Boolean           @default(false)
+  score               Int               @default(0)
+  defaultPrivacy      PrivacyVisibility @default(PRIVATE)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
-  avatar               UserAvatar?
-  documents            Document[]
-  customFlashcards     CustomFlashcard[]
-  customQuestions      CustomQuestion[]
-  customQuizzes        CustomQuiz[]
-  quizAttempts         UserQuizAttempt[]
-  documentTranslations DocumentTranslation[]
-  weeklyStats          UserWeeklyStats[]
-  badges               UserBadge[]
+  avatar                 UserAvatar?
+  documents              Document[]
+  customFlashcards       CustomFlashcard[]
+  customQuestions        CustomQuestion[]
+  customQuizzes          CustomQuiz[]
+  quizAttempts           UserQuizAttempt[]
+  documentTranslations   DocumentTranslation[]
+  weeklyStats            UserWeeklyStats[]
+  badges                 UserBadge[]
   apprenticeshipProgress UserApprenticeshipProgress[]
-  customCategories     Category[]
+  customCategories       Category[]
 
-  industry Industry? @relation(fields: [industryId], references: [id])
+  industry Industry @relation(fields: [industryId], references: [id])
 
   following Follow[] @relation("UserFollowing")
   followers Follow[] @relation("UserFollowers")
 
   sharedQuizzes CustomQuizShare[] @relation("SharedCustomQuizzes")
-
-  lessonRequestsSent LessonRequest[] @relation("LessonRequestsSent")
-  lessonRequestsReceived LessonRequest[] @relation("LessonRequestsReceived")
 
   notifications Notification[]
 
@@ -587,28 +523,6 @@ enum LessonRequestStatus {
   DENIED
 }
 
-model LessonRequest {
-  id String @id @default(cuid())
-
-  requesterId String
-  recipientId String
-
-  status LessonRequestStatus @default(PENDING)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  requester User @relation("LessonRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
-  recipient User @relation("LessonRequestsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
-
-  @@unique([requesterId, recipientId])
-  @@index([requesterId])
-  @@index([recipientId])
-  @@index([status])
-  @@index([recipientId, status])
-  @@map("lesson_requests")
-}
-
 enum NotificationType {
   DOCUMENT_READY
   DOCUMENT_ERROR
@@ -619,7 +533,7 @@ enum NotificationType {
 }
 
 model Notification {
-  id     String           @id @default(cuid())
+  id     String @id @default(cuid())
   userId String
 
   type NotificationType
@@ -644,4 +558,3 @@ model Notification {
   @@index([userId, createdAt])
   @@map("notifications")
 }
-
