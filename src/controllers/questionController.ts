@@ -1017,7 +1017,7 @@ export const getDocumentsByCategory = async (c: Context) => {
       return errorResponse(c, "Category is required", 400);
     }
 
-    // Map category name to ID
+    // Map default category names to IDs
     const categoryMap: Record<string, number> = {
       'safety': 1,
       'technical': 2,
@@ -1027,9 +1027,41 @@ export const getDocumentsByCategory = async (c: Context) => {
       'general': 6,
     };
 
-    const categoryId = categoryMap[category.toLowerCase()];
+    const categoryLower = category.toLowerCase();
+    let categoryId = categoryMap[categoryLower];
+
+    // If not a default category, look it up in the database
     if (!categoryId) {
-      return errorResponse(c, "Invalid category", 400);
+      // Try exact match first (case-sensitive)
+      let foundCategory = await prisma.category.findFirst({
+        where: {
+          OR: [
+            { name: category, userId: user.id }, // User's custom category (exact match)
+            { name: category, isDefault: true }, // Default category (exact match)
+          ],
+        },
+        select: { id: true },
+      });
+
+      // If not found, try with capitalized first letter
+      if (!foundCategory) {
+        const categoryName = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+        foundCategory = await prisma.category.findFirst({
+          where: {
+            OR: [
+              { name: categoryName, userId: user.id }, // User's custom category
+              { name: categoryName, isDefault: true }, // Default category
+            ],
+          },
+          select: { id: true },
+        });
+      }
+
+      if (!foundCategory) {
+        return errorResponse(c, "Category not found", 404);
+      }
+
+      categoryId = foundCategory.id;
     }
 
     // Check cache first
@@ -2012,6 +2044,7 @@ export const getAllCategories = async (c: Context) => {
       select: {
         id: true,
         name: true,
+        isDefault: true,
         _count: {
           select: {
             documents: {
@@ -2041,6 +2074,7 @@ export const getAllCategories = async (c: Context) => {
     const categoriesWithCounts = categories.map((cat) => ({
       id: cat.id,
       name: cat.name,
+      isDefault: cat.isDefault,
       documentCount: cat._count.documents,
     }));
 

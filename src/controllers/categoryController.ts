@@ -1,5 +1,68 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
+import redisClient from "../lib/redis";
+
+// Helper function to invalidate cache by pattern
+const invalidateCachePattern = async (pattern: string): Promise<void> => {
+  try {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+    const keys = await redisClient.keys(pattern);
+    if (keys.length > 0) {
+      await redisClient.del(keys);
+    }
+  } catch (error) {
+    console.error(`Error invalidating cache pattern ${pattern}:`, error);
+  }
+};
+
+/**
+ * Helper function to check and delete empty "Uncategorized" category for a user
+ * This is called after moving documents out of "Uncategorized"
+ */
+export const cleanupUncategorizedCategory = async (userId: string): Promise<void> => {
+  try {
+    // Find "Uncategorized" category for this user
+    const uncategorizedCategory = await prisma.category.findFirst({
+      where: {
+        name: "Uncategorized",
+        userId,
+        isDefault: false,
+      },
+    });
+
+    if (!uncategorizedCategory) {
+      return; // No "Uncategorized" category exists, nothing to clean up
+    }
+
+    const uncategorizedCategoryId = uncategorizedCategory.id;
+
+    // Check if category has any items (documents, flashcards, questions, quizzes)
+    const [documentCount, flashcardCount, questionCount, quizCount] = await Promise.all([
+      prisma.document.count({ where: { categoryId: uncategorizedCategoryId, userId } }),
+      prisma.customFlashcard.count({ where: { categoryId: uncategorizedCategoryId, userId } }),
+      prisma.customQuestion.count({ where: { categoryId: uncategorizedCategoryId, userId } }),
+      prisma.customQuiz.count({ where: { categoryId: uncategorizedCategoryId, userId } }),
+    ]);
+
+    const totalItems = documentCount + flashcardCount + questionCount + quizCount;
+
+    // If no items, delete the "Uncategorized" category
+    if (totalItems === 0) {
+      await prisma.category.delete({
+        where: { id: uncategorizedCategoryId },
+      });
+      console.log(`🗑️  Auto-deleted empty "Uncategorized" category (ID: ${uncategorizedCategoryId}) for user ${userId}`);
+      
+      // Invalidate categories cache
+      await invalidateCachePattern(`categories:all:${userId}`);
+    }
+  } catch (error) {
+    console.error("Error cleaning up Uncategorized category:", error);
+    // Don't throw - this is a cleanup operation, shouldn't fail the main operation
+  }
+};
 
 /**
  * Get all categories for a user
@@ -108,6 +171,9 @@ export const createCategory = async (c: Context) => {
       },
     });
 
+    // Invalidate categories cache
+    await invalidateCachePattern(`categories:all:${userId}`);
+
     return c.json({
       success: true,
       data: category,
@@ -188,28 +254,92 @@ export const deleteCategory = async (c: Context) => {
 
     // Check if category has any items (documents, flashcards, questions, quizzes)
     const [documentCount, flashcardCount, questionCount, quizCount] = await Promise.all([
-      prisma.document.count({ where: { categoryId } }),
-      prisma.customFlashcard.count({ where: { categoryId } }),
-      prisma.customQuestion.count({ where: { categoryId } }),
-      prisma.customQuiz.count({ where: { categoryId } }),
+      prisma.document.count({ where: { categoryId, userId } }),
+      prisma.customFlashcard.count({ where: { categoryId, userId } }),
+      prisma.customQuestion.count({ where: { categoryId, userId } }),
+      prisma.customQuiz.count({ where: { categoryId, userId } }),
     ]);
 
     const totalItems = documentCount + flashcardCount + questionCount + quizCount;
 
     if (totalItems > 0) {
-      return c.json(
-        {
-          success: false,
-          error: `Cannot delete category with ${totalItems} item(s). Please move or delete items first.`,
+      // Find or create "Uncategorized" category for this user
+      let uncategorizedCategory = await prisma.category.findFirst({
+        where: {
+          name: "Uncategorized",
+          userId,
+          isDefault: false,
         },
-        400
-      );
+      });
+
+      if (!uncategorizedCategory) {
+        // Create "Uncategorized" category if it doesn't exist
+        uncategorizedCategory = await prisma.category.create({
+          data: {
+            name: "Uncategorized",
+            userId,
+            isDefault: false,
+          },
+        });
+        console.log(`📁 Created "Uncategorized" category (ID: ${uncategorizedCategory.id}) for user ${userId}`);
+      }
+
+      const uncategorizedCategoryId = uncategorizedCategory.id;
+
+      // Move all items to "Uncategorized" category in a transaction
+      await prisma.$transaction([
+        // Move documents
+        prisma.document.updateMany({
+          where: { categoryId, userId },
+          data: { categoryId: uncategorizedCategoryId },
+        }),
+        // Move flashcards
+        prisma.customFlashcard.updateMany({
+          where: { categoryId, userId },
+          data: { categoryId: uncategorizedCategoryId },
+        }),
+        // Move questions
+        prisma.customQuestion.updateMany({
+          where: { categoryId, userId },
+          data: { categoryId: uncategorizedCategoryId },
+        }),
+        // Move quizzes
+        prisma.customQuiz.updateMany({
+          where: { categoryId, userId },
+          data: { categoryId: uncategorizedCategoryId },
+        }),
+        // Delete the category
+        prisma.category.delete({
+          where: { id: categoryId },
+        }),
+      ]);
+
+      console.log(`✅ Moved ${totalItems} item(s) from category ${categoryId} to "Uncategorized" (${uncategorizedCategoryId})`);
+
+      // Invalidate caches for both old and new categories
+      await Promise.all([
+        invalidateCachePattern(`categories:all:${userId}`),
+        invalidateCachePattern(`documents:category:${userId}:${categoryId}`),
+        invalidateCachePattern(`documents:category:${userId}:${uncategorizedCategoryId}`),
+        invalidateCachePattern(`documents:user:${userId}`),
+      ]);
+
+      return c.json({
+        success: true,
+        message: `Category deleted. ${totalItems} item(s) moved to "Uncategorized" folder.`,
+        movedItemsCount: totalItems,
+      });
     }
 
-    // Delete the category
+    // No items in category, safe to delete
     await prisma.category.delete({
       where: { id: categoryId },
     });
+
+    console.log(`✅ Deleted empty category ${categoryId} (${category.name})`);
+
+    // Invalidate categories cache
+    await invalidateCachePattern(`categories:all:${userId}`);
 
     return c.json({
       success: true,

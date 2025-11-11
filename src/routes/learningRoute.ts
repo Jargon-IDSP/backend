@@ -60,6 +60,11 @@ import {
   shareWithMultipleFriends,
 } from "../controllers/quizShareController";
 
+import {
+  createCategory,
+  deleteCategory,
+} from "../controllers/categoryController";
+
 export const learningRoute = new Hono();
 
 learningRoute.use("*", authMiddleware);
@@ -82,6 +87,8 @@ const customRoutes = new Hono()
   .get("/shared", getSharedWithMe)
 
   .get("/categories", getAllCategories)
+  .post("/categories", createCategory)
+  .delete("/categories/:id", deleteCategory)
   .get("/categories/:category/terms", getCustomFlashcardsByCategory)
   .get("/categories/:category/questions", getCustomQuestionsByCategory)
   .get("/categories/:category/quizzes", getCustomQuizzesByCategory)

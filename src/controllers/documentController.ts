@@ -1019,30 +1019,148 @@ export const updateDocument = async (c: Context) => {
     }
 
     const body = await c.req.json();
-    const { name } = body;
+    const { name, categoryId } = body;
 
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      return c.json({ error: "Invalid document name" }, 400);
+    // Build update data object
+    const updateData: { filename?: string; categoryId?: number } = {};
+    const quizUpdateData: { name?: string; categoryId?: number } = {};
+
+    // Only process name if it's provided and not empty
+    if (name !== undefined && name !== null && name !== '') {
+      if (typeof name !== 'string' || !name.trim()) {
+        return c.json({ error: "Invalid document name" }, 400);
+      }
+      updateData.filename = name.trim();
+      quizUpdateData.name = name.trim();
     }
 
-    // Update document and associated quiz in a transaction
-    const [updatedDocument] = await prisma.$transaction([
+    if (categoryId !== undefined) {
+      if (typeof categoryId !== 'number') {
+        return c.json({ error: "Invalid categoryId" }, 400);
+      }
+
+      console.log(`📁 Updating document category: documentId=${id}, categoryId=${categoryId}, userId=${user.id}`);
+
+      // Default category IDs (1-6): Safety, Technical, Training, Workplace, Professional, General
+      // These are always available to all users
+      const DEFAULT_CATEGORY_IDS = [1, 2, 3, 4, 5, 6];
+      const isDefaultCategoryId = DEFAULT_CATEGORY_IDS.includes(categoryId);
+
+      // If it's a default category ID, allow it immediately
+      if (isDefaultCategoryId) {
+        console.log(`✅ Allowing default category: ${categoryId}`);
+        updateData.categoryId = categoryId;
+        quizUpdateData.categoryId = categoryId;
+      } else {
+        // For custom categories, verify they exist and belong to the user
+        const category = await prisma.category.findUnique({
+          where: { id: categoryId },
+        });
+
+        if (!category) {
+          console.error(`❌ Category not found: categoryId=${categoryId}`);
+          return c.json({ error: "Category not found" }, 404);
+        }
+
+        console.log(`📋 Category found: id=${category.id}, name=${category.name}, userId=${category.userId}, isDefault=${category.isDefault}, requestingUserId=${user.id}`);
+
+        // Check if it's marked as default or belongs to the user
+        const isDefaultCategory = category.isDefault === true;
+        const isUserCategory = category.userId === user.id;
+
+        console.log(`🔍 Validation: isDefaultCategory=${isDefaultCategory}, isUserCategory=${isUserCategory}, category.userId=${category.userId}, user.id=${user.id}`);
+
+        if (!isDefaultCategory && !isUserCategory) {
+          console.error(`❌ Category access denied: categoryId=${categoryId}, userId=${user.id}, category.userId=${category.userId}, isDefault=${category.isDefault}`);
+          return c.json({ error: "You can only use your own categories" }, 403);
+        }
+
+        console.log(`✅ Allowing category: ${categoryId}`);
+        updateData.categoryId = categoryId;
+        quizUpdateData.categoryId = categoryId;
+      }
+    }
+
+    // If no updates provided, return error
+    if (Object.keys(updateData).length === 0) {
+      return c.json({ error: "No valid updates provided" }, 400);
+    }
+
+    // Get old categoryId for cache invalidation
+    const oldCategoryId = document.categoryId;
+
+    // Build transaction array
+    const transactionOps: any[] = [
       prisma.document.update({
         where: { id },
-        data: { filename: name.trim() },
+        data: updateData,
       }),
-      // Update the associated custom quiz name to match
-      prisma.customQuiz.updateMany({
-        where: { documentId: id },
-        data: { name: name.trim() },
-      }),
-    ]);
+    ];
+
+    // Only update quiz if there are changes to make
+    if (Object.keys(quizUpdateData).length > 0) {
+      transactionOps.push(
+        prisma.customQuiz.updateMany({
+          where: { documentId: id },
+          data: quizUpdateData,
+        })
+      );
+    }
+
+    // Update associated flashcards and questions if category changed
+    if (categoryId !== undefined && categoryId !== oldCategoryId) {
+      transactionOps.push(
+        prisma.customFlashcard.updateMany({
+          where: { documentId: id },
+          data: { categoryId },
+        }),
+        prisma.customQuestion.updateMany({
+          where: {
+            customQuiz: { documentId: id },
+          },
+          data: { categoryId },
+        })
+      );
+    }
+
+    // Update document and associated data in a transaction
+    const [updatedDocument] = await prisma.$transaction(transactionOps);
 
     console.log("🔄 Invalidating caches after document update...");
-    await Promise.all([
+    const cacheInvalidations = [
       invalidateCachePattern(`documents:user:${user.id}`),
       invalidateCachePattern(`document:${id}`),
-    ]);
+    ];
+
+    // Invalidate old and new category caches if category changed
+    if (categoryId !== undefined && categoryId !== oldCategoryId) {
+      if (oldCategoryId) {
+        cacheInvalidations.push(
+          invalidateCachePattern(`documents:category:${user.id}:${oldCategoryId}`)
+        );
+      }
+      cacheInvalidations.push(
+        invalidateCachePattern(`documents:category:${user.id}:${categoryId}`)
+      );
+      cacheInvalidations.push(invalidateCachePattern(`categories:all:${user.id}`));
+    }
+
+    await Promise.all(cacheInvalidations);
+
+    // If document was moved out of "Uncategorized", check if we should auto-delete it
+    if (categoryId !== undefined && categoryId !== oldCategoryId && oldCategoryId) {
+      // Check if the old category was "Uncategorized"
+      const oldCategory = await prisma.category.findUnique({
+        where: { id: oldCategoryId },
+        select: { name: true, userId: true, isDefault: true },
+      });
+
+      if (oldCategory && oldCategory.name === "Uncategorized" && oldCategory.userId === user.id && !oldCategory.isDefault) {
+        // Import and call cleanup function
+        const { cleanupUncategorizedCategory } = await import("./categoryController");
+        await cleanupUncategorizedCategory(user.id);
+      }
+    }
 
     return c.json({
       success: true,
@@ -1082,6 +1200,9 @@ export const deleteDocument = async (c: Context) => {
 
     await s3.send(deleteCommand);
 
+    // Store categoryId before deletion for cleanup check
+    const categoryId = document.categoryId;
+
     await prisma.document.delete({
       where: { id },
     });
@@ -1095,6 +1216,20 @@ export const deleteDocument = async (c: Context) => {
       invalidateCachePattern(`custom:document:${id}:*`),
       invalidateCachePattern(`questions:document:${id}:*`),
     ]);
+
+    // If document was in "Uncategorized", check if we should auto-delete it
+    if (categoryId) {
+      const category = await prisma.category.findUnique({
+        where: { id: categoryId },
+        select: { name: true, userId: true, isDefault: true },
+      });
+
+      if (category && category.name === "Uncategorized" && category.userId === user.id && !category.isDefault) {
+        // Import and call cleanup function
+        const { cleanupUncategorizedCategory } = await import("./categoryController");
+        await cleanupUncategorizedCategory(user.id);
+      }
+    }
 
     return c.json({ message: "Document deleted successfully" });
   } catch (error) {
@@ -1205,7 +1340,7 @@ export const getDocumentStatus = async (c: Context) => {
         hasQuiz: hasQuizInDb, 
         flashcardCount: hasFlashcards ? flashcardCount : quickFlashcardCount,
         questionCount: hasQuiz ? questionCount : quickQuestionCount,
-        categoryId: quiz?.categoryId || quickCategoryId || null,
+        categoryId: quiz?.categoryId || quickCategoryId || document.categoryId || null,
         quickTranslation: hasQuickCache && !hasFlashcards, 
       },
       translation: document.translation,
