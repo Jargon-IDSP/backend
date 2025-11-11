@@ -197,7 +197,7 @@ model UserApprenticeshipProgress {
   id         String @id @default(cuid())
   userId     String
   levelId    Int
-  industryId Int?
+  industryId Int    @default(6) // Default to "general" industry
 
   quizzesCompleted Int     @default(0)
   isLevelComplete  Boolean @default(false)
@@ -205,9 +205,9 @@ model UserApprenticeshipProgress {
   unlockedAt  DateTime  @default(now())
   completedAt DateTime?
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  level    Level     @relation(fields: [levelId], references: [id])
-  industry Industry? @relation(fields: [industryId], references: [id])
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level    Level    @relation(fields: [levelId], references: [id])
+  industry Industry @relation(fields: [industryId], references: [id])
 
   @@unique([userId, levelId, industryId])
   @@index([userId])
@@ -437,7 +437,7 @@ model User {
   lastName            String?
   username            String?
   language            String            @default("english")
-  industryId          Int?
+  industryId          Int               @default(6) // Default to "general" industry
   onboardingCompleted Boolean           @default(false)
   introductionViewed  Boolean           @default(false)
   score               Int               @default(0)
@@ -457,7 +457,7 @@ model User {
   apprenticeshipProgress UserApprenticeshipProgress[]
   customCategories       Category[]
 
-  industry Industry? @relation(fields: [industryId], references: [id])
+  industry Industry @relation(fields: [industryId], references: [id])
 
   following Follow[] @relation("UserFollowing")
   followers Follow[] @relation("UserFollowers")

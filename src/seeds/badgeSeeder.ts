@@ -10,7 +10,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Foundation level for General jargon',
     iconUrl: 'general/G1.svg',
     levelId: 1,
-    industryId: null,
+    industryId: 6,
   },
   {
     code: 'foundation-electrician',
@@ -26,6 +26,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Foundation level for Plumber',
     iconUrl: 'plumber/P1.svg',
     levelId: 1,
+    industryId: 2,
   },
   {
     code: 'foundation-carpenter',
@@ -33,6 +34,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Foundation level for Carpenter',
     iconUrl: 'carpenter/C1.svg',
     levelId: 1,
+    industryId: 3,
   },
   {
     code: 'foundation-mechanic',
@@ -40,6 +42,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Foundation level for Mechanic',
     iconUrl: 'mechanic/E1.svg',
     levelId: 1,
+    industryId: 4,
   },
   {
     code: 'foundation-welder',
@@ -47,6 +50,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Foundation level for Welder',
     iconUrl: 'welder/W1.svg',
     levelId: 1,
+    industryId: 5,
   },
 
   // Intermediate Level Badges
@@ -56,7 +60,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Intermediate level for General jargon',
     iconUrl: 'general/G2.svg',
     levelId: 2,
-    industryId: null,
+    industryId: 6,
   },
   {
     code: 'intermediate-electrician',
@@ -72,6 +76,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Intermediate level for Plumber',
     iconUrl: 'plumber/P2.svg',
     levelId: 2,
+    industryId: 2,
   },
   {
     code: 'intermediate-carpenter',
@@ -79,6 +84,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Intermediate level for Carpenter',
     iconUrl: 'carpenter/C2.svg',
     levelId: 2,
+    industryId: 3,
   },
   {
     code: 'intermediate-mechanic',
@@ -86,6 +92,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Intermediate level for Mechanic',
     iconUrl: 'mechanic/E2.svg',
     levelId: 2,
+    industryId: 4,
   },
   {
     code: 'intermediate-welder',
@@ -93,6 +100,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Intermediate level for Welder',
     iconUrl: 'welder/W2.svg',
     levelId: 2,
+    industryId: 5,
   },
 
   // Advanced Level Badges
@@ -102,7 +110,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Advanced level for General jargon',
     iconUrl: 'general/G3.svg',
     levelId: 3,
-    industryId: null,
+    industryId: 6,
   },
   {
     code: 'advanced-electrician',
@@ -118,6 +126,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Advanced level for Plumber',
     iconUrl: 'plumber/P3.svg',
     levelId: 3,
+    industryId: 2,
   },
   {
     code: 'advanced-carpenter',
@@ -125,6 +134,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Advanced level for Carpenter',
     iconUrl: 'carpenter/C3.svg',
     levelId: 3,
+    industryId: 3,
   },
   {
     code: 'advanced-mechanic',
@@ -132,6 +142,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Advanced level for Mechanic',
     iconUrl: 'mechanic/E3.svg',
     levelId: 3,
+    industryId: 4,
   },
   {
     code: 'advanced-welder',
@@ -139,6 +150,7 @@ const badges: BadgeData[] = [
     description: 'Complete all quizzes in Advanced level for Welder',
     iconUrl: 'welder/W3.svg',
     levelId: 3,
+    industryId: 5,
   },
 ];
 

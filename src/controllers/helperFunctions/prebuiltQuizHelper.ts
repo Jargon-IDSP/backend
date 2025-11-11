@@ -217,6 +217,25 @@ export async function startPrebuiltQuizAttempt(
 
   if (!quiz) throw new Error("Prebuilt quiz not found");
 
+  // Check prerequisites for boss quiz (quiz 3)
+  if (quiz.quizNumber === 3) {
+    // Boss quiz requires completing quizzes 1 and 2 first
+    const progress = await prisma.userApprenticeshipProgress.findUnique({
+      where: {
+        userId_levelId_industryId: {
+          userId,
+          levelId: quiz.levelId,
+          industryId: quiz.industryId || null,
+        },
+      },
+    });
+
+    // User must have completed at least 2 quizzes before attempting boss quiz
+    if (!progress || progress.quizzesCompleted < 2) {
+      throw new Error("You must complete quizzes 1 and 2 before attempting the challenge quiz");
+    }
+  }
+
   // Generate questions for this attempt
   const questionIds = await generatePrebuiltQuizQuestions(prebuiltQuizId);
 
@@ -382,6 +401,12 @@ async function awardBadgesForCompletion(
   quizType: string,
   passed: boolean
 ): Promise<void> {
+  // Only count quiz as completed if user passed (or there's no passing requirement)
+  if (!passed) {
+    console.log(`User ${userId} did not pass quiz ${quizNumber} for level ${levelId}, not counting towards progress`);
+    return;
+  }
+
   // Update apprenticeship progress
   const progress = await prisma.userApprenticeshipProgress.upsert({
     where: {
@@ -433,7 +458,16 @@ async function awardBadgesForCompletion(
           badgeId: levelBadge.id,
         },
       }).catch(() => {}); // Ignore if already exists
+
+      // Invalidate badge cache so new badge shows up immediately
+      const { invalidateCachePattern } = await import("../../lib/redis");
+      await invalidateCachePattern(`prebuilt:badges:${userId}`);
+      console.log(`🏆 Badge awarded: ${levelBadge.name}`);
     }
+
+    // No need to invalidate levels cache - levels endpoint doesn't cache anymore
+    // Next level will unlock immediately on next fetch since backend calculates accessibility in real-time
+    console.log(`✨ Level ${levelId} completed! Next level will be accessible immediately.`);
   }
 
   // Points milestone badges have been removed

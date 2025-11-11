@@ -787,8 +787,8 @@ export const completeQuiz = async (c: Context) => {
       // Invalidate user-related caches after quiz completion
       await invalidateCachePattern(`questions:user:${userId}:*`);
       await invalidateCachePattern(`quizzes:user:${userId}:*`);
-      // Invalidate levels cache to update completion status and unlock next levels
-      await invalidateCachePattern(`levels:*:${userId}`);
+      // Note: No need to invalidate levels cache - we don't cache the levels endpoint anymore
+      // Levels are fetched fresh on each request to ensure accurate accessibility status
 
       return c.json(successResponse({ quizAttempt, pointsEarned }));
     } else if (type === "custom") {
@@ -2133,6 +2133,8 @@ async function awardBadgesForCompletion(
         console.log("Badge already exists or error:", error.message);
       });
 
+      // Invalidate badge cache so new badge shows up immediately
+      await invalidateCachePattern(`prebuilt:badges:${userId}`);
       console.log("Badge awarded:", levelBadge.name);
     } else {
       console.log("No badge found for level:", levelId, "industry:", industryId);

@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
-const dataDirectory = '../backend/jargon-terms'
+const dataDirectory = './jargon-terms'
 
 const prismaModule = await import('@prisma/client') as any
 const { PrismaClient } = prismaModule
