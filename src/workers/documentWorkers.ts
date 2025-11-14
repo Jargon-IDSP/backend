@@ -228,7 +228,6 @@ console.log("✅ Flashcard worker initialized");
 // Error handlers for OCR worker
 ocrWorker.on("completed", async (job) => {
   console.log(`✅ OCR job ${job.id} completed successfully`);
-  // No notification here - wait for final "Document Ready!" after flashcards complete
 });
 
 ocrWorker.on("failed", async (job, err) => {

@@ -614,7 +614,7 @@ export async function generateFlashcardsFull(
         userId,
         type: "DOCUMENT_READY",
         title: "Document Ready!",
-        message: `Your document "${document.filename}" has been processed and is ready to study.`,
+        message: `Your document "${document.filename}" has been fully processed and saved to your profile.`,
         actionUrl: `/learning/documents/${documentId}/study`,
         documentId,
       });
