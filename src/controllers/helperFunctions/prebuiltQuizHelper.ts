@@ -6,7 +6,8 @@ import { addWeeklyScore } from "./weeklyTrackingHelper";
  * Returns array of question IDs to use for the quiz
  */
 export async function generatePrebuiltQuizQuestions(
-  prebuiltQuizId: string
+  prebuiltQuizId: string,
+  industryOnly: boolean = false
 ): Promise<string[]> {
   const quiz = await prisma.prebuiltQuiz.findUnique({
     where: { id: prebuiltQuizId },
@@ -18,16 +19,16 @@ export async function generatePrebuiltQuizQuestions(
 
   switch (quizType) {
     case "TERM_TO_TRANSLATION":
-      return await generateTermToTranslationQuestions(levelId, industryId, questionsPerQuiz);
+      return await generateTermToTranslationQuestions(levelId, industryId, questionsPerQuiz, industryOnly);
 
     case "TRANSLATION_TO_DEFINITION":
-      return await generateTranslationToDefinitionQuestions(levelId, industryId, questionsPerQuiz);
+      return await generateTranslationToDefinitionQuestions(levelId, industryId, questionsPerQuiz, industryOnly);
 
     case "MIXED_QUESTIONS":
-      return await generateMixedQuestions(levelId, industryId, questionsPerQuiz);
+      return await generateMixedQuestions(levelId, industryId, questionsPerQuiz, industryOnly);
 
     case "BOSS_QUIZ":
-      return await generateBossQuizQuestions(levelId, industryId, questionsPerQuiz);
+      return await generateBossQuizQuestions(levelId, industryId, questionsPerQuiz, industryOnly);
 
     default:
       throw new Error(`Unknown quiz type: ${quizType}`);

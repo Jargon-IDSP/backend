@@ -109,12 +109,33 @@ export const enrichFlashcard = (flashcard: any, language?: string) => {
   };
 };
 
+// Seeded random number generator for consistent but varied shuffling
+const seededRandom = (seed: number) => {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+};
+
 export const combineFlashcardsForPractice = (
   industryFlashcards: any[],
   generalFlashcards: any[],
-  limit: number = 50
+  limit: number = 50,
+  seed?: number
 ): any[] => {
-  return [...industryFlashcards, ...generalFlashcards].slice(0, limit);
+  const combined = [...industryFlashcards, ...generalFlashcards];
+
+  // If seed provided, shuffle deterministically based on seed
+  if (seed !== undefined) {
+    const random = seededRandom(seed);
+    for (let i = combined.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [combined[i], combined[j]] = [combined[j], combined[i]];
+    }
+  }
+
+  return combined.slice(0, limit);
 };
 
 export const calculateAvailableTerms = async (

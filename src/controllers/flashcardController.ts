@@ -284,16 +284,18 @@ export const getPracticeTermsByLevel = async (c: Context) => {
     const { levelId } = extractRouteParams(c);
     const { language, industryId } = extractQueryParams(c);
     const limitParam = c.req.query("limit");
+    const sessionParam = c.req.query("session");
     const limit = limitParam ? parseInt(limitParam) : 50;
+    const session = sessionParam ? parseInt(sessionParam) : undefined;
 
     if (!levelId) {
       return errorResponse(c, "Level ID is required", 400);
     }
 
-    // Check cache first
+    // Check cache first - include session in cache key for varied results
     const cacheKey = `practice:level:${levelId}:${language}:${
       industryId || "all"
-    }:limit${limit}`;
+    }:limit${limit}:session${session || "none"}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
       return c.json(cached);
@@ -344,10 +346,13 @@ export const getPracticeTermsByLevel = async (c: Context) => {
     );
     console.log(`⏱️  Total DB time: ${Date.now() - dbStart}ms`);
 
+    // Use session as seed for randomization if provided
+    const seed = session !== undefined ? parsedLevelId * 1000 + session : undefined;
     const combinedFlashcards = combineFlashcardsForPractice(
       industryFlashcards,
       generalFlashcards,
-      limit
+      limit,
+      seed
     );
 
     if (combinedFlashcards.length === 0) {
@@ -362,6 +367,7 @@ export const getPracticeTermsByLevel = async (c: Context) => {
       count: displayFlashcards.length,
       level_id: levelId,
       industry_id: industryId,
+      session: session,
     });
 
     // Cache for 5 minutes
@@ -373,6 +379,65 @@ export const getPracticeTermsByLevel = async (c: Context) => {
     return errorResponse(
       c,
       error.message || "Failed to fetch practice terms",
+      500
+    );
+  }
+};
+
+export const getIndustryTermsByLevel = async (c: Context) => {
+  try {
+    const { levelId, industryId } = extractRouteParams(c);
+    const { language } = extractQueryParams(c);
+    const lang = normalizeLanguage(language);
+
+    if (!levelId || !industryId) {
+      return errorResponse(c, "Level ID and Industry ID are required", 400);
+    }
+
+    const parsedLevelId = parseInt(levelId);
+    const parsedIndustryId = parseInt(industryId);
+
+    // Check cache first
+    const cacheKey = `industry-terms:level:${levelId}:industry:${industryId}:${lang}`;
+    const cached = await getFromCache<any>(cacheKey);
+    if (cached) {
+      return c.json(cached);
+    }
+
+    const flashcards = await prisma.flashcard.findMany({
+      where: {
+        levelId: parsedLevelId,
+        industryId: parsedIndustryId,
+      },
+      include: {
+        industry: true,
+        level: true,
+      },
+    });
+
+    if (flashcards.length === 0) {
+      return errorResponse(c, "No terms found for this level and industry", 404);
+    }
+
+    const displayFlashcards = flashcards.map((card: FlashcardWithRelations) =>
+      enrichFlashcard(card, lang)
+    );
+
+    const response = successResponse(displayFlashcards, {
+      count: displayFlashcards.length,
+      level_id: levelId,
+      industry_id: industryId,
+    });
+
+    // Cache for 5 minutes
+    await setCache(cacheKey, response, 300);
+
+    return c.json(response);
+  } catch (error: any) {
+    console.error("Error fetching industry terms by level:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch industry terms",
       500
     );
   }

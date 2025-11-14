@@ -408,8 +408,8 @@ export async function getAvailableBadges(c: Context) {
         industry: true,
       },
       orderBy: [
-        { category: 'asc' },
         { levelId: 'asc' },
+        { industryId: 'asc' },
       ],
     });
 
