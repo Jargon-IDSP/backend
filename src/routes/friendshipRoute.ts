@@ -157,6 +157,7 @@ friendshipRoute.get("/", async (c: Context) => {
           email: true,
           score: true,
           industryId: true,
+          language: true,
         },
       },
     },
@@ -189,6 +190,7 @@ friendshipRoute.get("/", async (c: Context) => {
       email: follow.following.email,
       score: follow.following.score,
       industryId: follow.following.industryId,
+      language: follow.following.language,
       friendshipId: follow.id,
       status: "FOLLOWING", // Always FOLLOWING since we're filtering for that status
       isMutual, // Add flag to indicate if it's mutual (friends)
