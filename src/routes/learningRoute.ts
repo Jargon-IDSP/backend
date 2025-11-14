@@ -6,6 +6,7 @@ import {
   getRandomFlashcard,
   getFlashcardsByLevel,
   getPracticeTermsByLevel,
+  getIndustryTermsByLevel,
   getLevels,
   getCustomFlashcardsByDocument,
   getCustomFlashcardsByUser,
@@ -74,6 +75,7 @@ const existingRoutes = new Hono()
   .get("/levels/:levelId", getLevels)
 
   .get("/levels/:levelId/terms", getPracticeTermsByLevel)
+  .get("/levels/:levelId/industry/:industryId/terms", getIndustryTermsByLevel)
   .get("/levels/:levelId/questions", getQuestionsByLevel)
   .get("/levels/:levelId/quizzes", getQuizzesByLevel)
   .get("/levels/:levelId/quiz/generate", generateQuizForLevel)
