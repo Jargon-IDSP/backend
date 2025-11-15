@@ -484,6 +484,7 @@ export const searchUsers = async (c: Context) => {
         lastName: true,
         email: true,
         score: true,
+        language: true,
       },
       take: 10,
     });
@@ -548,5 +549,86 @@ export const searchUsers = async (c: Context) => {
   } catch (error) {
     console.error("Error searching users:", error);
     return c.json({ success: false, error: "Failed to search users" }, 500);
+  }
+};
+
+/**
+ * Get friend suggestions (random users to follow)
+ * Returns 3 random users that the current user is not following
+ */
+export const getFriendSuggestions = async (c: Context) => {
+  try {
+    const user = c.get("user");
+    const userId = user.id;
+
+    // Get all users the current user is following (including blocked)
+    const following = await prisma.follow.findMany({
+      where: {
+        followerId: userId,
+      },
+      select: {
+        followingId: true,
+      },
+    });
+
+    const followingIds = new Set(following.map((f) => f.followingId));
+    followingIds.add(userId); // Exclude self
+
+    // Get random users excluding self and users already following
+    const allUsers = await prisma.user.findMany({
+      where: {
+        id: { notIn: Array.from(followingIds) },
+      },
+      select: {
+        id: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        score: true,
+        language: true,
+      },
+      take: 100, // Get a larger pool to randomize from
+    });
+
+    // Shuffle and take 3
+    const shuffled = allUsers.sort(() => 0.5 - Math.random());
+    const suggestions = shuffled.slice(0, 3);
+
+    // Check which users are following you
+    const suggestionIds = suggestions.map((u) => u.id);
+    const followingYou = await prisma.follow.findMany({
+      where: {
+        followerId: { in: suggestionIds },
+        followingId: userId,
+        status: "FOLLOWING",
+      },
+    });
+
+    const followingYouMap = new Map(
+      followingYou.map((f) => [f.followerId, f])
+    );
+
+    const results = suggestions.map((user) => {
+      const theyFollow = followingYouMap.get(user.id);
+
+      let friendshipStatus = "none";
+      let friendshipId = null;
+
+      if (theyFollow) {
+        friendshipStatus = "follower";
+      }
+
+      return {
+        ...user,
+        friendshipStatus,
+        friendshipId,
+      };
+    });
+
+    return c.json({ success: true, data: results });
+  } catch (error) {
+    console.error("Error fetching friend suggestions:", error);
+    return c.json({ success: false, error: "Failed to fetch suggestions" }, 500);
   }
 };

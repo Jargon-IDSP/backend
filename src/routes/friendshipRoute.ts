@@ -12,6 +12,7 @@ import {
   getFriends,
   getBlockedUsers,
   searchUsers,
+  getFriendSuggestions,
 } from "../controllers/friendshipController";
 import { authMiddleware } from "../middleware/authMiddleware";
 
@@ -21,6 +22,9 @@ friendshipRoute.use("*", authMiddleware);
 
 // Search users
 friendshipRoute.get("/search", searchUsers);
+
+// Get friend suggestions
+friendshipRoute.get("/suggestions", getFriendSuggestions);
 
 // Get relationships
 friendshipRoute.get("/friends", getFriends);
