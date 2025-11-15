@@ -48,6 +48,75 @@ export const invalidateCachePattern = async (pattern: string): Promise<void> => 
   }
 };
 
+// Helper function to check if user can access a document based on owner's privacy
+async function canAccessDocument(userId: string, document: { userId: string; user?: { defaultPrivacy: string } | null }, documentId: string): Promise<boolean> {
+  try {
+    // Owner always has access
+    if (document.userId === userId) {
+      return true;
+    }
+
+    // If no user data, deny access
+    if (!document.user) {
+      console.error('canAccessDocument: document.user is null/undefined', { documentId, userId });
+      return false;
+    }
+
+    const ownerPrivacy = document.user.defaultPrivacy;
+
+    // PUBLIC: Everyone can access
+    if (ownerPrivacy === "PUBLIC") {
+      return true;
+    }
+
+    // FRIENDS: Check if mutually following
+    if (ownerPrivacy === "FRIENDS") {
+      const [yourFollow, theirFollow] = await Promise.all([
+        prisma.follow.findUnique({
+          where: {
+            followerId_followingId: {
+              followerId: userId,
+              followingId: document.userId,
+            }
+          }
+        }),
+        prisma.follow.findUnique({
+          where: {
+            followerId_followingId: {
+              followerId: document.userId,
+              followingId: userId,
+            }
+          }
+        })
+      ]);
+
+      return !!yourFollow && yourFollow.status === "FOLLOWING" && !!theirFollow && theirFollow.status === "FOLLOWING";
+    }
+
+    // PRIVATE: Check if user has specific quiz share access
+    if (ownerPrivacy === "PRIVATE") {
+      const quizShares = await prisma.customQuiz.findFirst({
+        where: {
+          documentId,
+          sharedWith: {
+            some: {
+              sharedWithUserId: userId,
+              status: "ACCEPTED"
+            }
+          }
+        }
+      });
+
+      return !!quizShares;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('canAccessDocument error:', error, { documentId, userId });
+    return false;
+  }
+}
+
 export async function extractTextWithOCR(
   documentId: string,
   userId: string
@@ -431,17 +500,22 @@ export async function generateFlashcardsQuick(
   const crypto = await import("crypto");
   const textHash = crypto.createHash("md5").update(document.extractedText.slice(0, 6000)).digest("hex");
   const extractionCacheKey = `extraction:${textHash}`;
+  const extractionDocCacheKey = `extraction:doc:${documentId}`;  // Optimized: cache by doc ID too
 
-  await redisClient.setEx(
-    extractionCacheKey,
-    3600, // 1 hour TTL (much longer than quick cache)
-    JSON.stringify({
-      rawTerms: top10,
-      rawQuestions: qEnglish,
-      categoryId,
-      documentId,
-    })
-  );
+  const cacheData = JSON.stringify({
+    rawTerms: top10,
+    rawQuestions: qEnglish,
+    categoryId,
+    documentId,
+    extractedText: document.extractedText,  // Store text so Full generation can skip DB fetch
+    filename: document.filename,
+  });
+
+  // Store in both caches (hash-based and doc-id-based) for optimal reuse
+  await Promise.all([
+    redisClient.setEx(extractionCacheKey, 3600, cacheData),  // Hash-based (dedup across docs)
+    redisClient.setEx(extractionDocCacheKey, 3600, cacheData),  // Doc-id-based (fast lookup)
+  ]);
 
   console.log(`💾 Extraction cached separately for reuse: ${extractionCacheKey}`);
   console.log(`🌐 Translating flashcards to ${userLanguage}...`);
@@ -502,26 +576,48 @@ export async function generateFlashcardsFull(
       throw new Error("Missing GOOGLE_GENAI_API_KEY");
     }
 
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
-      select: {
-        id: true,
-        extractedText: true,
-        filename: true,
-        categoryId: true,
-      },
-    });
+    // Optimized: Check doc-id cache first to potentially skip DB fetch
+    const extractionDocCacheKey = `extraction:doc:${documentId}`;
+    const docCached = await redisClient.get(extractionDocCacheKey);
 
-    if (!document || !document.extractedText) {
-      console.log("❌ No document or extracted text found");
-      return;
+    let document: { id: string; extractedText: string; filename: string; categoryId: number | null };
+    let extractionCached: string | null;
+
+    if (docCached) {
+      console.log("⚡ Found extraction cache by document ID - skipping DB fetch!");
+      const cached = JSON.parse(docCached);
+      document = {
+        id: cached.documentId,
+        extractedText: cached.extractedText,
+        filename: cached.filename,
+        categoryId: cached.categoryId,
+      };
+      extractionCached = docCached;  // Reuse the same cache data
+    } else {
+      // Cache miss - fetch from DB
+      const dbDocument = await prisma.document.findUnique({
+        where: { id: documentId },
+        select: {
+          id: true,
+          extractedText: true,
+          filename: true,
+          categoryId: true,
+        },
+      });
+
+      if (!dbDocument || !dbDocument.extractedText) {
+        console.log("❌ No document or extracted text found");
+        return;
+      }
+
+      document = dbDocument;
+
+      // Check hash-based extraction cache
+      const crypto = await import("crypto");
+      const textHash = crypto.createHash("md5").update(document.extractedText.slice(0, 6000)).digest("hex");
+      const extractionCacheKey = `extraction:${textHash}`;
+      extractionCached = await redisClient.get(extractionCacheKey);
     }
-
-    // Try to get extraction from dedicated cache first (1 hour TTL)
-    const crypto = await import("crypto");
-    const textHash = crypto.createHash("md5").update(document.extractedText.slice(0, 6000)).digest("hex");
-    const extractionCacheKey = `extraction:${textHash}`;
-    const extractionCached = await redisClient.get(extractionCacheKey);
 
     let top10: any[];
     let qEnglish: any[];
@@ -663,84 +759,70 @@ export async function generateFlashcardsFull(
       `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database (batched)\n`
     );
 
-    // Verify the data is actually visible in the database before sending notification
+    // Optimized: Verify the data exists using simple count queries (much faster than full fetch)
     console.log("🔍 Verifying database records are visible...");
-    const verification = await prisma.customQuiz.findFirst({
-      where: {
-        id: quizData.id,
-        documentId: documentId
-      },
-      include: {
-        questions: true,
-        document: {
-          include: {
-            flashcards: {
-              where: { documentId: documentId }
-            }
-          }
-        }
-      }
-    });
+    const [quizExists, questionCount, flashcardCount] = await Promise.all([
+      prisma.customQuiz.count({ where: { id: quizData.id, documentId: documentId } }),
+      prisma.customQuestion.count({ where: { customQuizId: quizData.id } }),
+      prisma.customFlashcard.count({ where: { documentId: documentId } })
+    ]);
 
-    if (!verification || verification.questions.length === 0 || verification.document.flashcards.length === 0) {
+    if (quizExists === 0 || questionCount === 0 || flashcardCount === 0) {
       console.error("⚠️ Database verification failed - records not visible yet!");
-      console.error(`Quiz: ${verification ? 'found' : 'NOT FOUND'}`);
-      console.error(`Questions: ${verification?.questions.length || 0}`);
-      console.error(`Flashcards: ${verification?.document.flashcards.length || 0}`);
+      console.error(`Quiz: ${quizExists > 0 ? 'found' : 'NOT FOUND'}`);
+      console.error(`Questions: ${questionCount}`);
+      console.error(`Flashcards: ${flashcardCount}`);
       // Wait a moment and try again
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      const retryVerification = await prisma.customQuiz.findFirst({
-        where: { id: quizData.id },
-        include: {
-          questions: true,
-          document: {
-            include: {
-              flashcards: { where: { documentId: documentId } }
-            }
-          }
-        }
-      });
+      const [retryQuizExists, retryQuestionCount, retryFlashcardCount] = await Promise.all([
+        prisma.customQuiz.count({ where: { id: quizData.id } }),
+        prisma.customQuestion.count({ where: { customQuizId: quizData.id } }),
+        prisma.customFlashcard.count({ where: { documentId: documentId } })
+      ]);
 
-      if (!retryVerification || retryVerification.questions.length === 0 || retryVerification.document.flashcards.length === 0) {
+      if (retryQuizExists === 0 || retryQuestionCount === 0 || retryFlashcardCount === 0) {
         throw new Error("Database records not visible after transaction - data integrity issue");
       }
       console.log("✅ Database records verified on retry");
     } else {
-      console.log(`✅ Database records verified: ${verification.questions.length} questions, ${verification.document.flashcards.length} flashcards`);
+      console.log(`✅ Database records verified: ${questionCount} questions, ${flashcardCount} flashcards`);
     }
 
     await redisClient.del(quickCacheKey);
 
     console.log("🔄 Invalidating caches after flashcard generation...");
     await Promise.all([
+      // Pattern-based invalidations (with wildcards - require KEYS scan)
       invalidateCachePattern(`custom:user:${userId}:*`),
       invalidateCachePattern(`custom:document:${documentId}:*`),
       invalidateCachePattern(`questions:user:${userId}:*`),
       invalidateCachePattern(`questions:document:${documentId}:*`),
       invalidateCachePattern(`quizzes:user:${userId}:*`),
-      invalidateCachePattern(`document:status:${documentId}`),
-      invalidateCachePattern(`documents:user:${userId}`),
-      invalidateCachePattern(`documents:category:${userId}:${categoryId}`),
-      invalidateCachePattern(`categories:all:${userId}`),
+      // Optimized: Batch delete specific keys (no wildcards - faster O(1) operation)
+      redisClient.del([
+        `document:status:${documentId}`,
+        `documents:user:${userId}`,
+        `documents:category:${userId}:${categoryId}`,
+        `categories:all:${userId}`
+      ])
     ]);
     console.log("✅ Cache invalidation complete");
 
-    // Create notification for document completion ONLY after verifying data exists
-    try {
-      await createNotification({
-        userId,
-        type: "DOCUMENT_READY",
-        title: "Document Ready!",
-        message: `Your document "${document.filename}" has been fully processed and saved to your profile.`,
-        actionUrl: `/learning/documents/${documentId}/study`,
-        documentId,
+    // Optimized: Create notification in background (non-blocking - saves ~50-100ms)
+    createNotification({
+      userId,
+      type: "DOCUMENT_READY",
+      title: "Document Ready!",
+      message: `Your document "${document.filename}" has been fully processed and saved to your profile.`,
+      actionUrl: `/learning/documents/${documentId}/study`,
+      documentId,
+    })
+      .then(() => console.log("📬 Document completion notification created"))
+      .catch((notifError) => {
+        console.error("Failed to create notification:", notifError);
+        // Don't fail the whole process if notification fails
       });
-      console.log("📬 Document completion notification created");
-    } catch (notifError) {
-      console.error("Failed to create notification:", notifError);
-      // Don't fail the whole process if notification fails
-    }
 
     console.log(`${"=".repeat(60)}`);
     console.log(`✨ FLASHCARD GENERATION COMPLETE FOR ${documentId}`);
@@ -1020,33 +1102,24 @@ export const getDocument = async (c: Context) => {
 
     const document = await prisma.document.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            defaultPrivacy: true,
+          }
+        }
+      }
     });
 
     if (!document) {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz visibility
-    const isOwner = document.userId === user.id;
-
-    if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
-      });
-
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
-
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
+    // Check if user can access this document
+    const hasAccess = await canAccessDocument(user.id, document, id);
+    if (!hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
     const response = { document };
@@ -1072,33 +1145,24 @@ export const getDownloadUrl = async (c: Context) => {
 
     const document = await prisma.document.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            defaultPrivacy: true,
+          }
+        }
+      }
     });
 
     if (!document) {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz visibility
-    const isOwner = document.userId === user.id;
-
-    if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
-      });
-
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
-
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
+    // Check if user can access this document
+    const hasAccess = await canAccessDocument(user.id, document, id);
+    if (!hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
     const command = new GetObjectCommand({
@@ -1372,52 +1436,59 @@ export const getDocumentStatus = async (c: Context) => {
     //   return c.json(cached);
     // }
 
+    // Optimized: Only select fields we actually need (avoids fetching 100+ unnecessary language fields)
     const document = await prisma.document.findUnique({
       where: { id },
-      include: {
-        translation: true,
-        flashcards: true,
-        customQuizzes: {
-          include: {
-            questions: true,
-          },
+      select: {
+        id: true,
+        userId: true,
+        filename: true,
+        ocrProcessed: true,
+        categoryId: true,
+        user: {
+          select: {
+            id: true,
+            defaultPrivacy: true,
+          }
         },
-      },
+        translation: {
+          select: { id: true, documentId: true }  // Just for existence check
+        },
+        flashcards: {
+          select: { id: true }  // Just for count
+        },
+        customQuizzes: {
+          select: {
+            id: true,
+            categoryId: true,
+            questions: {
+              select: { id: true }  // Just for count
+            }
+          }
+        }
+      }
     });
 
     if (!document) {
       return c.json({ error: "Document not found" }, 404);
     }
 
-    // Check if user is owner or has access via quiz visibility
-    const isOwner = document.userId === user.id;
-
-    if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
-      });
-
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
-
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
+    // Check if user can access this document
+    const hasAccess = await canAccessDocument(user.id, document, id);
+    if (!hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
+    // Optimized: Batch Redis reads using mGet (faster than sequential gets)
     const quickCacheKey = `flashcards:quick:${id}`;
-    const quickCached = await redisClient.get(quickCacheKey);
-    const hasQuickCache = !!quickCached;
-
     const translationQuickCacheKey = `translation:quick:${id}`;
-    const translationQuickCached = await redisClient.get(translationQuickCacheKey);
+
+    const [quickCached, translationQuickCached] = await redisClient.mGet([
+      quickCacheKey,
+      translationQuickCacheKey
+    ]);
+
+    const hasQuickCache = !!quickCached;
     const hasQuickTranslation = !!translationQuickCached;
 
     let quickFlashcardCount = 0;
@@ -1433,20 +1504,21 @@ export const getDocumentStatus = async (c: Context) => {
 
     const hasTranslation = !!document.translation || hasQuickTranslation;
     const flashcardCount = document.flashcards.length;
-    const hasFlashcards = flashcardCount > 0; // Only true when DB flashcards exist
+    const hasFlashcardsInDb = flashcardCount > 0; // Only true when DB flashcards exist
 
     const quiz = document.customQuizzes[0];
     const questionCount = quiz?.questions.length || 0;
     const hasQuizInDb = !!quiz && questionCount > 0;
 
-    // Questions tick off when quick cache exists (earlier)
+    // Status tracking optimization: Questions tick off early, flashcards tick off late
+    // - hasQuiz ticks off when quick cache exists (user sees questions available faster)
+    // - hasFlashcards ticks off only when DB save completes (prevents premature completion)
     const hasQuiz = hasQuizInDb || (hasQuickCache && quickQuestionCount > 0);
-    // Flashcards tick off only when DB save completes (later)
-    const hasFlashcardsComplete = hasFlashcards; 
+    const hasFlashcards = hasFlashcardsInDb;
 
     let status: "processing" | "completed" | "error" = "processing";
 
-    if (document.ocrProcessed && hasTranslation && hasFlashcards && hasQuiz) {
+    if (document.ocrProcessed && hasTranslation && hasFlashcardsInDb && hasQuiz) {
       status = "completed";
     } else if (document.ocrProcessed === false) {
       status = "processing";
@@ -1456,12 +1528,12 @@ export const getDocumentStatus = async (c: Context) => {
       status: {
         status,
         hasTranslation,
-        hasFlashcards: hasFlashcardsComplete, // Only tick off when DB save completes
-        hasQuiz: hasQuiz, // Tick off when quick cache OR DB exists
-        flashcardCount: hasFlashcards ? flashcardCount : quickFlashcardCount,
+        hasFlashcards, // Ticks off when DB save completes (slower, more accurate)
+        hasQuiz, // Ticks off when quick cache exists (faster, better UX)
+        flashcardCount: hasFlashcardsInDb ? flashcardCount : quickFlashcardCount,
         questionCount: hasQuizInDb ? questionCount : quickQuestionCount,
         categoryId: quiz?.categoryId || quickCategoryId || document.categoryId || null,
-        quickTranslation: hasQuickCache && !hasFlashcards,
+        quickTranslation: hasQuickCache && !hasFlashcardsInDb,
       },
       translation: document.translation,
       document: {
@@ -1498,37 +1570,30 @@ export const getDocumentTranslation = async (c: Context) => {
       const quickData = JSON.parse(quickCached);
       console.log(`⚡ Serving quick translation from cache for ${id}`);
 
-      // Fetch document to get filename
+      // Fetch document to get filename and check access
       const document = await prisma.document.findUnique({
         where: { id },
-        select: { id: true, userId: true, filename: true },
+        select: {
+          id: true,
+          userId: true,
+          filename: true,
+          user: {
+            select: {
+              id: true,
+              defaultPrivacy: true,
+            }
+          }
+        },
       });
 
       if (!document) {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      // Check if user is owner or has access via quiz visibility
-      const isOwner = document.userId === user.id;
-
-      if (!isOwner) {
-        // Get quizzes for this document
-        const quizzes = await prisma.customQuiz.findMany({
-          where: { documentId: id },
-        });
-
-        // Check if user can access any quiz from this document
-        let hasAccess = false;
-        for (const quiz of quizzes) {
-          if (await canAccessQuiz(user.id, quiz)) {
-            hasAccess = true;
-            break;
-          }
-        }
-
-        if (!hasAccess) {
-          return c.json({ error: "Forbidden" }, 403);
-        }
+      // Check if user can access this document
+      const hasAccess = await canAccessDocument(user.id, document, id);
+      if (!hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
 
       // Return in same format as DB translation
@@ -1573,6 +1638,12 @@ export const getDocumentTranslation = async (c: Context) => {
       include: {
         document: {
           include: {
+            user: {
+              select: {
+                id: true,
+                defaultPrivacy: true,
+              }
+            },
             customQuizzes: {
               include: {
                 questions: true,
@@ -1586,33 +1657,24 @@ export const getDocumentTranslation = async (c: Context) => {
     if (!translation) {
       const document = await prisma.document.findUnique({
         where: { id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              defaultPrivacy: true,
+            }
+          }
+        }
       });
 
       if (!document) {
         return c.json({ error: "Document not found" }, 404);
       }
 
-      // Check if user is owner or has access via quiz visibility
-      const isOwner = document.userId === user.id;
-
-      if (!isOwner) {
-        // Get quizzes for this document
-        const quizzes = await prisma.customQuiz.findMany({
-          where: { documentId: id },
-        });
-
-        // Check if user can access any quiz from this document
-        let hasAccess = false;
-        for (const quiz of quizzes) {
-          if (await canAccessQuiz(user.id, quiz)) {
-            hasAccess = true;
-            break;
-          }
-        }
-
-        if (!hasAccess) {
-          return c.json({ error: "Forbidden" }, 403);
-        }
+      // Check if user can access this document
+      const hasAccess = await canAccessDocument(user.id, document, id);
+      if (!hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
 
       return c.json({
@@ -1622,27 +1684,10 @@ export const getDocumentTranslation = async (c: Context) => {
       });
     }
 
-    // Check if user is owner or has access via quiz visibility
-    const isOwner = translation.document.userId === user.id;
-
-    if (!isOwner) {
-      // Get quizzes for this document
-      const quizzes = await prisma.customQuiz.findMany({
-        where: { documentId: id },
-      });
-
-      // Check if user can access any quiz from this document
-      let hasAccess = false;
-      for (const quiz of quizzes) {
-        if (await canAccessQuiz(user.id, quiz)) {
-          hasAccess = true;
-          break;
-        }
-      }
-
-      if (!hasAccess) {
-        return c.json({ error: "Forbidden" }, 403);
-      }
+    // Check if user can access this document
+    const hasAccess = await canAccessDocument(user.id, translation.document, id);
+    if (!hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
     const response = { translation };

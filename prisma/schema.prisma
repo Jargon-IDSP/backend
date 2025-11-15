@@ -239,8 +239,10 @@ model Document {
   @@index([userId])
   @@index([categoryId])
   @@index([createdAt])
+  @@index([ocrProcessed])
   @@index([userId, createdAt])
   @@index([userId, categoryId])
+  @@index([userId, ocrProcessed])
   @@map("documents")
 }
 
