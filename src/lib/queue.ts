@@ -104,6 +104,7 @@ export interface FlashcardJobData {
   documentId: string;
   userId: string;
   categoryId?: number | null;
+  userLanguage?: string; // Preloaded user language (optional, for optimization)
 }
 
 // Create queues lazily

@@ -54,16 +54,24 @@ export const ocrWorker = new Worker<OCRJobData>(
         `✅ OCR completed for document ${documentId} (${extractedText.length} chars)`
       );
 
+      // Preload user data once (saves DB query - both translation and flashcard need it)
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { language: true },
+      });
+      const userLanguage = user?.language || 'english';
+      console.log(`👤 User language preference: ${userLanguage}`);
+
       // PARALLEL EXECUTION: Translation and flashcard generation can run simultaneously!
       // Flashcard generation only needs extractedText, not translation
       const { flashcardQueue } = await import('../lib/queue');
-      
+
       const [translationResult, flashcardQueueResult] = await Promise.allSettled([
         // Start translation (runs in background)
         (async () => {
           try {
             console.log(`🌐 Starting translation for document ${documentId}`);
-            await translateDocument(documentId, userId, extractedText);
+            await translateDocument(documentId, userId, extractedText, userLanguage);
             console.log(`✅ Translation completed for document ${documentId}`);
             return { success: true };
           } catch (translationError) {
@@ -83,6 +91,7 @@ export const ocrWorker = new Worker<OCRJobData>(
             documentId,
             userId,
             categoryId: job.data.categoryId || 6,
+            userLanguage, // Pass preloaded user language to flashcard worker
           },
           {
             ...jobOptions,
@@ -160,7 +169,7 @@ export const translationWorker = new Worker<TranslationJobData>(
 export const flashcardWorker = new Worker<FlashcardJobData>(
   "document-flashcards",
   async (job: Job<FlashcardJobData>) => {
-    const { documentId, userId, categoryId } = job.data;
+    const { documentId, userId, categoryId, userLanguage } = job.data;
 
     console.log(`\n${"=".repeat(60)}`);
     console.log(
@@ -188,11 +197,12 @@ export const flashcardWorker = new Worker<FlashcardJobData>(
         `✅ Starting flashcard generation for ${document.extractedText.length} chars of text...`
       );
 
-      // Generate flashcards and questions together
+      // Generate flashcards and questions together (pass userLanguage to skip DB query)
       await generateFlashcardsAndQuestionsOptimized(
         documentId,
         userId,
-        categoryId
+        categoryId,
+        userLanguage
       );
 
       await job.updateProgress(90);

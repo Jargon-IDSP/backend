@@ -82,7 +82,8 @@ export async function extractTextWithOCR(
 export async function translateDocument(
   documentId: string,
   userId: string,
-  extractedText: string
+  extractedText: string,
+  preloadedUserLanguage?: string // Optional: if provided, skip DB query
 ) {
   try {
     console.log(`\n${"=".repeat(60)}`);
@@ -93,11 +94,18 @@ export async function translateDocument(
       "./helperFunctions/documentHelper"
     );
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { language: true },
-    });
-    const userLanguage = user?.language || 'english';
+    // Use preloaded user language if provided, otherwise fetch from DB
+    let userLanguage: string;
+    if (preloadedUserLanguage) {
+      userLanguage = preloadedUserLanguage;
+      console.log(`✅ Using preloaded user language: ${userLanguage}`);
+    } else {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { language: true },
+      });
+      userLanguage = user?.language || 'english';
+    }
 
     console.log(`🎯 User's preferred language: ${userLanguage}`);
     console.log(`⚡ Translating ${userLanguage} first for fast display...`);
@@ -153,30 +161,36 @@ export async function translateDocument(
 export async function generateFlashcardsAndQuestionsOptimized(
   documentId: string,
   userId: string,
-  providedCategoryId?: number | null
+  providedCategoryId?: number | null,
+  preloadedUserLanguage?: string // Optional: if provided, skip DB query
 ) {
   try {
     console.log(`\n${"=".repeat(60)}`);
     console.log(`🎴 OPTIMIZED FLASHCARD GENERATION: ${documentId}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    // Parallelize user lookup and existing flashcard check
-    const [existingFlashcards, user] = await Promise.all([
-      prisma.customFlashcard.count({
-        where: { documentId },
-      }),
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { language: true },
-      }),
-    ]);
+    // Check if flashcards already exist
+    const existingFlashcards = await prisma.customFlashcard.count({
+      where: { documentId },
+    });
 
     if (existingFlashcards > 0) {
       console.log(`⚠️ Flashcards already exist for document ${documentId}, skipping generation`);
       return;
     }
 
-    const userLanguage = user?.language || 'english';
+    // Use preloaded user language if provided, otherwise fetch from DB
+    let userLanguage: string;
+    if (preloadedUserLanguage) {
+      userLanguage = preloadedUserLanguage;
+      console.log(`✅ Using preloaded user language: ${userLanguage}`);
+    } else {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { language: true },
+      });
+      userLanguage = user?.language || 'english';
+    }
 
     console.log(`🎯 User's preferred language: ${userLanguage}`);
     console.log(`⚡ Generating flashcards in ${userLanguage} first...`);
@@ -317,7 +331,7 @@ export async function generateFlashcardsQuick(
     throw new Error("No document or extracted text");
   }
 
-  const { getExistingTerms } = await import("./helperFunctions/documentHelper");
+  const { getExistingTerms, translateUserPreferredLanguage } = await import("./helperFunctions/documentHelper");
   const {
     extractTermsAndQuestions,
     translateUserPreferredLanguageOnly,
@@ -346,13 +360,50 @@ export async function generateFlashcardsQuick(
   const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
   const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
 
-  console.log("📝 Step 1: Extracting terms and questions in English...");
+  console.log("🚀 PARALLEL EXECUTION: Starting term extraction AND quick document translation...");
 
-  const extraction = await extractTermsAndQuestions(
-    ai,
-    document.extractedText,
-    existingDbTermsEnglish
-  );
+  // PARALLEL: Extract flashcard terms AND translate document (both only need OCR text!)
+  const [extraction, quickDocTranslation] = await Promise.all([
+    // Path A: Extract terms and questions
+    (async () => {
+      console.log("📝 Path A: Extracting terms and questions in English...");
+      return await extractTermsAndQuestions(
+        ai,
+        document.extractedText,
+        existingDbTermsEnglish
+      );
+    })(),
+
+    // Path B: Quick translate document (if not already cached)
+    (async () => {
+      const quickCacheKey = `translation:quick:${documentId}`;
+      const cached = await redisClient.get(quickCacheKey);
+      if (cached) {
+        console.log("⚡ Path B: Document translation already cached, skipping");
+        return null;
+      }
+
+      console.log(`🌐 Path B: Translating document to ${userLanguage}...`);
+      const translation = await translateUserPreferredLanguage(
+        document.extractedText,
+        userLanguage
+      );
+
+      // Cache quick document translation
+      await redisClient.setEx(
+        quickCacheKey,
+        300,
+        JSON.stringify({
+          language: userLanguage,
+          text: translation,
+          textEnglish: document.extractedText,
+        })
+      );
+
+      console.log(`✅ Path B: Quick document translation cached!`);
+      return translation;
+    })()
+  ]);
 
   const dedup = makeDedupSet(existingDbTermsEnglish);
   const top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
@@ -364,15 +415,8 @@ export async function generateFlashcardsQuick(
   const qEnglish = filterAndFillQuestions(extraction.questions, top10);
 
   console.log(`✅ Extracted ${top10.length} terms and ${qEnglish.length} questions in English`);
-  console.log(`🌐 Step 2: Translating to ${userLanguage}...`);
 
-  const translated = await translateUserPreferredLanguageOnly(ai, top10, qEnglish, userLanguage);
-
-  console.log(`✅ Translated to ${userLanguage}`);
-
-  const termsOut = buildTermsOutput(top10, translated, documentId, userId);
-  const questionsOut = buildQuestionsOutput(qEnglish, translated, documentId, userId, top10);
-
+  // Determine category early (before translation) so we can cache it
   let categoryId: number;
   if (providedCategoryId) {
     categoryId = providedCategoryId;
@@ -382,6 +426,32 @@ export async function generateFlashcardsQuick(
     const { categorizeDocument } = await import("./helperFunctions/documentHelper");
     categoryId = await categorizeDocument(document.extractedText);
   }
+
+  // Cache extraction results separately (longer TTL, survives quick->full transition)
+  const crypto = await import("crypto");
+  const textHash = crypto.createHash("md5").update(document.extractedText.slice(0, 6000)).digest("hex");
+  const extractionCacheKey = `extraction:${textHash}`;
+
+  await redisClient.setEx(
+    extractionCacheKey,
+    3600, // 1 hour TTL (much longer than quick cache)
+    JSON.stringify({
+      rawTerms: top10,
+      rawQuestions: qEnglish,
+      categoryId,
+      documentId,
+    })
+  );
+
+  console.log(`💾 Extraction cached separately for reuse: ${extractionCacheKey}`);
+  console.log(`🌐 Translating flashcards to ${userLanguage}...`);
+
+  const translated = await translateUserPreferredLanguageOnly(ai, top10, qEnglish, userLanguage);
+
+  console.log(`✅ Flashcards translated to ${userLanguage}`);
+
+  const termsOut = buildTermsOutput(top10, translated, documentId, userId);
+  const questionsOut = buildQuestionsOutput(qEnglish, translated, documentId, userId, top10);
 
   await redisClient.setEx(
     `flashcards:quick:${documentId}`,
@@ -447,59 +517,87 @@ export async function generateFlashcardsFull(
       return;
     }
 
-    const quickCacheKey = `flashcards:quick:${documentId}`;
-    const quickCached = await redisClient.get(quickCacheKey);
+    // Try to get extraction from dedicated cache first (1 hour TTL)
+    const crypto = await import("crypto");
+    const textHash = crypto.createHash("md5").update(document.extractedText.slice(0, 6000)).digest("hex");
+    const extractionCacheKey = `extraction:${textHash}`;
+    const extractionCached = await redisClient.get(extractionCacheKey);
 
     let top10: any[];
     let qEnglish: any[];
     let categoryId: number;
 
-    if (quickCached) {
-      console.log("⚡ Reusing extracted data from quick cache...");
-      const quickData = JSON.parse(quickCached);
-      top10 = quickData.rawTerms;
-      qEnglish = quickData.rawQuestions;
-      categoryId = quickData.categoryId;
+    if (extractionCached) {
+      console.log("⚡ Reusing extracted data from extraction cache (faster!)...");
+      const extractionData = JSON.parse(extractionCached);
+      top10 = extractionData.rawTerms;
+      qEnglish = extractionData.rawQuestions;
+      categoryId = providedCategoryId || extractionData.categoryId;
     } else {
-      console.log("📝 Extracting terms and questions in English...");
-      const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+      // Fallback to quick cache (5 minute TTL)
+      const quickCacheKey = `flashcards:quick:${documentId}`;
+      const quickCached = await redisClient.get(quickCacheKey);
 
-      // Parallelize these database queries
-      const [allExistingTerms, termsFromThisDocument] = await Promise.all([
-        getExistingTerms(userId),
-        prisma.customFlashcard.findMany({
-          where: { documentId },
-          select: { termEnglish: true },
-        }),
-      ]);
-      const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
-      const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
-
-      const extraction = await extractTermsAndQuestions(
-        ai,
-        document.extractedText,
-        existingDbTermsEnglish
-      );
-
-      const dedup = makeDedupSet(existingDbTermsEnglish);
-      top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
-
-      if (top10.length === 0) {
-        throw new Error("No usable terms after deduplication.");
-      }
-
-      qEnglish = filterAndFillQuestions(extraction.questions, top10);
-
-      if (providedCategoryId) {
-        categoryId = providedCategoryId;
-        console.log(`📁 Using user-selected category ID: ${categoryId}`);
-      } else if (document.categoryId) {
-        categoryId = document.categoryId;
-        console.log(`📁 Using existing category ID: ${categoryId}`);
+      if (quickCached) {
+        console.log("⚡ Reusing extracted data from quick cache...");
+        const quickData = JSON.parse(quickCached);
+        top10 = quickData.rawTerms;
+        qEnglish = quickData.rawQuestions;
+        categoryId = providedCategoryId || quickData.categoryId;
       } else {
-        const { categorizeDocument } = await import("./helperFunctions/documentHelper");
-        categoryId = await categorizeDocument(document.extractedText);
-        console.log(`📁 AI categorized document as category ID: ${categoryId}`);
+        console.log("📝 Extracting terms and questions in English (cache miss)...");
+        const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY });
+
+        // Parallelize these database queries
+        const [allExistingTerms, termsFromThisDocument] = await Promise.all([
+          getExistingTerms(userId),
+          prisma.customFlashcard.findMany({
+            where: { documentId },
+            select: { termEnglish: true },
+          }),
+        ]);
+        const termsToExclude = new Set(termsFromThisDocument.map(t => t.termEnglish.toLowerCase()));
+        const existingDbTermsEnglish = allExistingTerms.filter(term => !termsToExclude.has(term.toLowerCase()));
+
+        const extraction = await extractTermsAndQuestions(
+          ai,
+          document.extractedText,
+          existingDbTermsEnglish
+        );
+
+        const dedup = makeDedupSet(existingDbTermsEnglish);
+        top10 = cleanAndDeduplicateTerms(extraction.terms, dedup, 10);
+
+        if (top10.length === 0) {
+          throw new Error("No usable terms after deduplication.");
+        }
+
+        qEnglish = filterAndFillQuestions(extraction.questions, top10);
+
+        if (providedCategoryId) {
+          categoryId = providedCategoryId;
+          console.log(`📁 Using user-selected category ID: ${categoryId}`);
+        } else if (document.categoryId) {
+          categoryId = document.categoryId;
+          console.log(`📁 Using existing category ID: ${categoryId}`);
+        } else {
+          const { categorizeDocument } = await import("./helperFunctions/documentHelper");
+          categoryId = await categorizeDocument(document.extractedText);
+          console.log(`📁 AI categorized document as category ID: ${categoryId}`);
+        }
+
+        // Cache the extraction for next time
+        await redisClient.setEx(
+          extractionCacheKey,
+          3600, // 1 hour TTL
+          JSON.stringify({
+            rawTerms: top10,
+            rawQuestions: qEnglish,
+            categoryId,
+            documentId,
+          })
+        );
+        console.log(`💾 Extraction cached for future use: ${extractionCacheKey}`);
       }
     }
 
@@ -529,6 +627,10 @@ export async function generateFlashcardsFull(
       categoryId
     );
 
+    // Batch database writes to prevent transaction timeouts on large documents
+    const BATCH_SIZE = 10; // Process 10 items at a time
+
+    // First, create document update and quiz in one transaction
     await prisma.$transaction([
       prisma.document.update({
         where: { id: documentId },
@@ -537,12 +639,28 @@ export async function generateFlashcardsFull(
       prisma.customQuiz.create({
         data: quizData
       }),
-      ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
-      ...questionData.map((data) => prisma.customQuestion.create({ data })),
     ]);
 
+    // Batch flashcard inserts
+    for (let i = 0; i < flashcardData.length; i += BATCH_SIZE) {
+      const batch = flashcardData.slice(i, i + BATCH_SIZE);
+      await prisma.$transaction(
+        batch.map((data) => prisma.customFlashcard.create({ data }))
+      );
+      console.log(`💾 Saved flashcards batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(flashcardData.length / BATCH_SIZE)}`);
+    }
+
+    // Batch question inserts
+    for (let i = 0; i < questionData.length; i += BATCH_SIZE) {
+      const batch = questionData.slice(i, i + BATCH_SIZE);
+      await prisma.$transaction(
+        batch.map((data) => prisma.customQuestion.create({ data }))
+      );
+      console.log(`💾 Saved questions batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(questionData.length / BATCH_SIZE)}`);
+    }
+
     console.log(
-      `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database\n`
+      `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database (batched)\n`
     );
 
     // Verify the data is actually visible in the database before sending notification
@@ -1315,14 +1433,16 @@ export const getDocumentStatus = async (c: Context) => {
 
     const hasTranslation = !!document.translation || hasQuickTranslation;
     const flashcardCount = document.flashcards.length;
-    const hasFlashcards = flashcardCount > 0;
+    const hasFlashcards = flashcardCount > 0; // Only true when DB flashcards exist
 
     const quiz = document.customQuizzes[0];
     const questionCount = quiz?.questions.length || 0;
-    const hasQuiz = !!quiz && questionCount > 0;
+    const hasQuizInDb = !!quiz && questionCount > 0;
 
-    const hasFlashcardsOrQuickCache = hasFlashcards || (hasQuickCache && quickFlashcardCount > 0);
-    const hasQuizInDb = hasQuiz; 
+    // Questions tick off when quick cache exists (earlier)
+    const hasQuiz = hasQuizInDb || (hasQuickCache && quickQuestionCount > 0);
+    // Flashcards tick off only when DB save completes (later)
+    const hasFlashcardsComplete = hasFlashcards; 
 
     let status: "processing" | "completed" | "error" = "processing";
 
@@ -1336,12 +1456,12 @@ export const getDocumentStatus = async (c: Context) => {
       status: {
         status,
         hasTranslation,
-        hasFlashcards: hasFlashcardsOrQuickCache,  
-        hasQuiz: hasQuizInDb, 
+        hasFlashcards: hasFlashcardsComplete, // Only tick off when DB save completes
+        hasQuiz: hasQuiz, // Tick off when quick cache OR DB exists
         flashcardCount: hasFlashcards ? flashcardCount : quickFlashcardCount,
-        questionCount: hasQuiz ? questionCount : quickQuestionCount,
+        questionCount: hasQuizInDb ? questionCount : quickQuestionCount,
         categoryId: quiz?.categoryId || quickCategoryId || document.categoryId || null,
-        quickTranslation: hasQuickCache && !hasFlashcards, 
+        quickTranslation: hasQuickCache && !hasFlashcards,
       },
       translation: document.translation,
       document: {
