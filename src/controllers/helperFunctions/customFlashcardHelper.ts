@@ -122,13 +122,13 @@ export async function extractTermsAndQuestions(
   existingDbTermsEnglish: string[]
 ): Promise<ExtractionResponse> {
   const extractionPrompt = `
-From the OCR text, you MUST select EXACTLY 15 DISTINCT, meaningful terms.
+From the OCR text, you MUST select EXACTLY 25 DISTINCT, meaningful terms.
 
 CRITICAL: Avoid these terms that the user already knows: ${existingDbTermsEnglish.slice(0, 200).join(", ")}
 
-IMPORTANT: You must return exactly 15 terms and 15 questions.
+IMPORTANT: You must return exactly 25 terms and 25 questions.
 - First, extract terms that appear directly in the document
-- If fewer than 15 terms are found, generate additional relevant terms related to the document's topic to reach exactly 15 terms
+- If fewer than 25 terms are found, generate additional relevant terms related to the document's topic to reach exactly 25 terms
 - For example, if a document mentions "PPE" and "hard hat", you could add related terms like "safety goggles", "steel-toed boots", "high-visibility vest", etc.
 - DO NOT include any terms from the "user already knows" list above
 
@@ -142,7 +142,7 @@ For each term provide:
    - Professional: Career development, industry standards, professional conduct, ethics
    - General: Basic concepts that don't fit other categories
 
-Also produce EXACTLY 15 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
+Also produce EXACTLY 25 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
 
 Return STRICT JSON ONLY:
 {
@@ -220,23 +220,24 @@ SOURCE:
   return parseJSONResponse<TranslationResponse>(translateText);
 }
 
-// Full translation: All 6 languages (SLOW!) - saves to DB
-export async function translateTermsAndQuestions(
+// Helper function to translate terms and questions to a single language
+async function translateSingleLanguage(
   ai: GoogleGenAI,
   terms: { english: string; definitionEnglish: string }[],
-  questions: { promptEnglish: string; correctEnglish: string }[]
-): Promise<TranslationResponse> {
+  questions: { promptEnglish: string; correctEnglish: string }[],
+  targetLanguage: string
+): Promise<{ terms: any[]; questions: any[] }> {
   const translatePrompt = `
-Translate the following English terms+definitions+prompts into french, chinese, spanish, tagalog, punjabi, korean.
+Translate the following English terms+definitions+prompts into ${targetLanguage} ONLY.
 Return STRICT JSON ONLY:
 {
   "terms": [{
     "english": "Adhesive",
-    "term": { "french":"...", "chinese":"...", "spanish":"...", "tagalog":"...", "punjabi":"...", "korean":"..." },
-    "definition": { "french":"...", "chinese":"...", "spanish":"...", "tagalog":"...", "punjabi":"...", "korean":"..." }
+    "term": { "${targetLanguage}":"..." },
+    "definition": { "${targetLanguage}":"..." }
   }],
   "questions": [{
-    "prompt": { "french":"...", "chinese":"...", "spanish":"...", "tagalog":"...", "punjabi":"...", "korean":"..." }
+    "prompt": { "${targetLanguage}":"..." }
   }]
 }
 
@@ -253,7 +254,58 @@ SOURCE:
   });
 
   const translateText = extractResponseText(translateResp);
-  return parseJSONResponse<TranslationResponse>(translateText);
+  return parseJSONResponse<{ terms: any[]; questions: any[] }>(translateText);
+}
+
+// Full translation: All 6 languages (PARALLELIZED!) - saves to DB
+export async function translateTermsAndQuestions(
+  ai: GoogleGenAI,
+  terms: { english: string; definitionEnglish: string }[],
+  questions: { promptEnglish: string; correctEnglish: string }[]
+): Promise<TranslationResponse> {
+  // Parallelize translations for all 6 languages (instead of 1 sequential call)
+  const languages = ['french', 'chinese', 'spanish', 'tagalog', 'punjabi', 'korean'];
+
+  const translationResults = await Promise.all(
+    languages.map(lang => translateSingleLanguage(ai, terms, questions, lang))
+  );
+
+  // Merge all language translations into a single response
+  const mergedTerms = terms.map((term, termIndex) => ({
+    english: term.english,
+    term: {
+      french: translationResults[0].terms[termIndex]?.term?.french ?? term.english,
+      chinese: translationResults[1].terms[termIndex]?.term?.chinese ?? term.english,
+      spanish: translationResults[2].terms[termIndex]?.term?.spanish ?? term.english,
+      tagalog: translationResults[3].terms[termIndex]?.term?.tagalog ?? term.english,
+      punjabi: translationResults[4].terms[termIndex]?.term?.punjabi ?? term.english,
+      korean: translationResults[5].terms[termIndex]?.term?.korean ?? term.english,
+    },
+    definition: {
+      french: translationResults[0].terms[termIndex]?.definition?.french ?? term.definitionEnglish,
+      chinese: translationResults[1].terms[termIndex]?.definition?.chinese ?? term.definitionEnglish,
+      spanish: translationResults[2].terms[termIndex]?.definition?.spanish ?? term.definitionEnglish,
+      tagalog: translationResults[3].terms[termIndex]?.definition?.tagalog ?? term.definitionEnglish,
+      punjabi: translationResults[4].terms[termIndex]?.definition?.punjabi ?? term.definitionEnglish,
+      korean: translationResults[5].terms[termIndex]?.definition?.korean ?? term.definitionEnglish,
+    }
+  }));
+
+  const mergedQuestions = questions.map((_, qIndex) => ({
+    prompt: {
+      french: translationResults[0].questions[qIndex]?.prompt?.french ?? questions[qIndex].promptEnglish,
+      chinese: translationResults[1].questions[qIndex]?.prompt?.chinese ?? questions[qIndex].promptEnglish,
+      spanish: translationResults[2].questions[qIndex]?.prompt?.spanish ?? questions[qIndex].promptEnglish,
+      tagalog: translationResults[3].questions[qIndex]?.prompt?.tagalog ?? questions[qIndex].promptEnglish,
+      punjabi: translationResults[4].questions[qIndex]?.prompt?.punjabi ?? questions[qIndex].promptEnglish,
+      korean: translationResults[5].questions[qIndex]?.prompt?.korean ?? questions[qIndex].promptEnglish,
+    }
+  }));
+
+  return {
+    terms: mergedTerms,
+    questions: mergedQuestions
+  };
 }
 
 export function cleanAndDeduplicateTerms(

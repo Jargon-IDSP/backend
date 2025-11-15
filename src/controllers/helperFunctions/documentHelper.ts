@@ -157,47 +157,24 @@ export async function translateFullDocument(
   return await getCachedData(
     cacheKey,
     async () => {
-      const translatePrompt = `
-Translate the following text into french, chinese, spanish, tagalog, punjabi, and korean.
-Maintain the original formatting and structure as much as possible.
+      // Parallelize translations for all 6 languages (instead of 1 sequential call)
+      const languages = ['french', 'chinese', 'spanish', 'tagalog', 'punjabi', 'korean'] as const;
 
-Return STRICT JSON ONLY in this format:
-{
-  "french": "...",
-  "chinese": "...",
-  "spanish": "...",
-  "tagalog": "...",
-  "punjabi": "...",
-  "korean": "..."
-}
-
-Text to translate:
-"""
-${ocrText.slice(0, 8000)}
-"""
-`.trim();
-
-      const responseText = await callGenAI(translatePrompt);
-      const translations = parseGenAIJSON<{
-        french: string;
-        chinese: string;
-        spanish: string;
-        tagalog: string;
-        punjabi: string;
-        korean: string;
-      }>(responseText);
+      const [french, chinese, spanish, tagalog, punjabi, korean] = await Promise.all(
+        languages.map(lang => translateSingleLanguage(ocrText, lang))
+      );
 
       return {
         id: crypto.randomUUID(),
         documentId,
         userId,
         textEnglish: ocrText,
-        textFrench: translations.french,
-        textChinese: translations.chinese,
-        textSpanish: translations.spanish,
-        textTagalog: translations.tagalog,
-        textPunjabi: translations.punjabi,
-        textKorean: translations.korean,
+        textFrench: french,
+        textChinese: chinese,
+        textSpanish: spanish,
+        textTagalog: tagalog,
+        textPunjabi: punjabi,
+        textKorean: korean,
       };
     },
     86400 // 24 hours cache (translations are static)
