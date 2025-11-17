@@ -17,7 +17,6 @@ import {
 import { getUserLanguageFromContext } from "./helperFunctions/languageHelper";
 import redisClient from "../lib/redis";
 
-// Helper function to get from cache
 const getFromCache = async <T>(key: string): Promise<T | null> => {
   try {
     const cached = await redisClient.get(key);
@@ -47,7 +46,6 @@ const setCache = async <T>(
   }
 };
 
-// Helper function to invalidate cache by pattern
 const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     const keys = await redisClient.keys(pattern);
@@ -78,7 +76,6 @@ export async function startAttempt(c: Context) {
 
     const attempt = await startQuizAttempt(userId, customQuizId);
 
-    // Invalidate quiz attempt caches after starting new attempt
     await Promise.all([
       invalidateCachePattern(`quiz:attempt:${userId}:${customQuizId}:*`),
       invalidateCachePattern(`quiz:attempts:inprogress:${userId}`),
@@ -103,7 +100,6 @@ export async function getQuiz(c: Context) {
   const userLanguage = await getUserLanguageFromContext(c);
 
   try {
-    // Handle synthetic quiz IDs from quick cache
     if (customQuizId.startsWith('quick-')) {
       console.log(`🔄 Detected synthetic quiz ID ${customQuizId}, checking quick cache`);
       const documentId = customQuizId.replace('quick-', '');
@@ -119,7 +115,6 @@ export async function getQuiz(c: Context) {
       const quickData = JSON.parse(quickCached);
       console.log(`✅ Found quick cache for document ${documentId}`);
 
-      // Build enriched questions from quick cache
       const enrichedQuestions = quickData.questions.map((questionOut: any) => {
         const correctTermIndex = parseInt(questionOut.correctTermId) - 1;
 
@@ -130,10 +125,8 @@ export async function getQuiz(c: Context) {
 
         const correctTerm = quickData.terms[correctTermIndex];
 
-        // Get the language we're querying for
         const lang = userLanguage?.toLowerCase() || 'english';
 
-        // Build choices array with correct answer and 3 wrong answers
         const allTerms = quickData.terms.filter((_: any, index: number) => index !== correctTermIndex);
         const wrongTerms = allTerms.sort(() => 0.5 - Math.random()).slice(0, 3);
 
@@ -150,15 +143,13 @@ export async function getQuiz(c: Context) {
           }))
         ];
 
-        // Shuffle and assign letter IDs (A, B, C, D)
         const shuffledChoices = allChoices.sort(() => 0.5 - Math.random());
         const choices = shuffledChoices.map((choice, index) => ({
           ...choice,
           id: String.fromCharCode(65 + index), // A, B, C, D
         }));
 
-        // Build prompts object with ALL available languages from quick cache
-        // This allows translation button to work even if user's preference is different
+
         const prompts: Record<string, string> = {};
         const allLanguages = ['english', 'french', 'chinese', 'spanish', 'tagalog', 'punjabi', 'korean'];
 
@@ -173,7 +164,7 @@ export async function getQuiz(c: Context) {
         return {
           id: questionOut.id,
           prompt: questionOut.prompt[lang] || questionOut.prompt.english,
-          prompts, // Include prompts for translation button
+          prompts,
           choices,
           correctAnswer: correctTerm.term.term[lang] || correctTerm.term.term.english,
           category: questionOut.category,
@@ -195,7 +186,6 @@ export async function getQuiz(c: Context) {
       return c.json(response);
     }
 
-    // Regular database quiz lookup
     const cacheKey = `quiz:${customQuizId}:${userLanguage}:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -210,7 +200,6 @@ export async function getQuiz(c: Context) {
 
     const response = { quiz, language: userLanguage };
 
-    // Cache for 10 minutes (quiz content rarely changes)
     await setCache(cacheKey, response, 600);
 
     return c.json(response);
@@ -229,7 +218,6 @@ export async function translateQuiz(c: Context) {
   }
 
   try {
-    // Check cache first
     const cacheKey = `quiz:translate:${customQuizId}:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -244,7 +232,6 @@ export async function translateQuiz(c: Context) {
 
     const response = { quiz };
 
-    // Cache for 10 minutes
     await setCache(cacheKey, response, 600);
 
     return c.json(response);
@@ -260,7 +247,6 @@ export async function getQuestion(c: Context) {
   const userLanguage = await getUserLanguageFromContext(c);
 
   try {
-    // Check cache first
     const cacheKey = `quiz:question:${questionId}:${userLanguage}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -275,7 +261,6 @@ export async function getQuestion(c: Context) {
 
     const response = { question };
 
-    // Cache for 10 minutes (questions rarely change)
     await setCache(cacheKey, response, 600);
 
     return c.json(response);
@@ -289,7 +274,6 @@ export async function translateQuestion(c: Context) {
   const questionId = c.req.param("questionId");
 
   try {
-    // Check cache first
     const cacheKey = `quiz:question:translate:${questionId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -304,7 +288,6 @@ export async function translateQuestion(c: Context) {
 
     const response = { question };
 
-    // Cache for 10 minutes
     await setCache(cacheKey, response, 600);
 
     return c.json(response);
@@ -331,7 +314,6 @@ export async function submitAnswer(c: Context) {
 
     const result = await recordQuizAnswer(attemptId, questionId, answerId);
 
-    // Invalidate quiz attempt caches after submitting answer
     await Promise.all([
       invalidateCachePattern(`quiz:attempt:${userId}:*`),
       invalidateCachePattern(`quiz:stats:${userId}`),
@@ -354,7 +336,6 @@ export async function getCurrentAttempt(c: Context) {
   }
 
   try {
-    // Check cache first
     const cacheKey = `quiz:attempt:${userId}:${customQuizId}:current`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -365,7 +346,6 @@ export async function getCurrentAttempt(c: Context) {
 
     const response = { attempt };
 
-    // Cache for 1 minute (attempt status changes frequently during quiz)
     await setCache(cacheKey, response, 60);
 
     return c.json(response);
@@ -383,7 +363,6 @@ export async function getStats(c: Context) {
   }
 
   try {
-    // Check cache first
     const cacheKey = `quiz:stats:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -392,7 +371,6 @@ export async function getStats(c: Context) {
 
     const stats = await getUserQuizStats(userId);
 
-    // Cache for 5 minutes
     await setCache(cacheKey, stats, 300);
 
     return c.json(stats);
@@ -406,7 +384,6 @@ export async function getAllAttempts(c: Context) {
   const customQuizId = c.req.param("customQuizId");
 
   try {
-    // Check cache first
     const cacheKey = `quiz:attempts:all:${customQuizId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -417,7 +394,6 @@ export async function getAllAttempts(c: Context) {
 
     const response = { attempts };
 
-    // Cache for 5 minutes
     await setCache(cacheKey, response, 300);
 
     return c.json(response);
@@ -435,7 +411,6 @@ export async function getInProgressAttempts(c: Context) {
   }
 
   try {
-    // Check cache first
     const cacheKey = `quiz:attempts:inprogress:${userId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -446,7 +421,6 @@ export async function getInProgressAttempts(c: Context) {
 
     const response = { attempts };
 
-    // Cache for 1 minute (in-progress status changes frequently)
     await setCache(cacheKey, response, 60);
 
     return c.json(response);
@@ -467,7 +441,6 @@ export async function retryAttempt(c: Context) {
   try {
     const attempt = await retryQuiz(userId, customQuizId);
 
-    // Invalidate quiz attempt caches after retry
     await Promise.all([
       invalidateCachePattern(`quiz:attempt:${userId}:${customQuizId}:*`),
       invalidateCachePattern(`quiz:attempts:inprogress:${userId}`),
@@ -492,7 +465,6 @@ export async function getAttemptHistory(c: Context) {
   }
 
   try {
-    // Check cache first
     const cacheKey = `quiz:history:${userId}:${customQuizId}`;
     const cached = await getFromCache<any>(cacheKey);
     if (cached) {
@@ -501,7 +473,6 @@ export async function getAttemptHistory(c: Context) {
 
     const history = await getUserQuizHistory(userId, customQuizId);
 
-    // Cache for 5 minutes
     await setCache(cacheKey, history, 300);
 
     return c.json(history);
