@@ -76,35 +76,22 @@ export async function recordQuizAnswer(
   const isCorrect = answerId === question.correctTermId;
   const pointsEarned = isCorrect ? question.pointsWorth : 0;
 
-  await prisma.userQuizAnswer.create({
-    data: {
-      attemptId,
-      questionId,
-      answerId,
-      isCorrect,
-      pointsEarned,
-      answeredAt: new Date(),
-    },
-  });
-
-  await updateAttemptProgress(attemptId);
+  await updateAttemptProgress(attemptId, isCorrect, pointsEarned);
 
   return { isCorrect, pointsEarned };
 }
 
-async function updateAttemptProgress(attemptId: string): Promise<void> {
+async function updateAttemptProgress(attemptId: string, isCorrect: boolean, pointsEarned: number): Promise<void> {
   const attempt = await prisma.userQuizAttempt.findUnique({
     where: { id: attemptId },
-    include: {
-      answers: true,
-    },
   });
 
   if (!attempt) throw new Error("Attempt not found");
 
-  const questionsAnswered = attempt.answers.length;
-  const questionsCorrect = attempt.answers.filter((a) => a.isCorrect).length;
-  const pointsEarned = attempt.answers.reduce((sum, a) => sum + a.pointsEarned, 0);
+  // Increment based on current answer
+  const questionsAnswered = attempt.questionsAnswered + 1;
+  const questionsCorrect = attempt.questionsCorrect + (isCorrect ? 1 : 0);
+  const totalPointsEarned = attempt.pointsEarned + pointsEarned;
 
   const percentComplete = Math.round((questionsAnswered / attempt.totalQuestions) * 100);
   const percentCorrect = questionsAnswered > 0
@@ -118,7 +105,7 @@ async function updateAttemptProgress(attemptId: string): Promise<void> {
     data: {
       questionsAnswered,
       questionsCorrect,
-      pointsEarned,
+      pointsEarned: totalPointsEarned,
       percentComplete,
       percentCorrect,
       completed,
@@ -131,12 +118,12 @@ async function updateAttemptProgress(attemptId: string): Promise<void> {
       where: { id: attempt.userId },
       data: {
         score: {
-          increment: pointsEarned,
+          increment: totalPointsEarned,
         },
       },
     });
-    
-    await addWeeklyScore(attempt.userId, pointsEarned);
+
+    await addWeeklyScore(attempt.userId, totalPointsEarned);
   }
 }
 
@@ -271,20 +258,6 @@ export async function getQuizAttempts(customQuizId: string) {
           username: true,
           firstName: true,
           lastName: true,
-        },
-      },
-      answers: {
-        include: {
-          question: {
-            select: {
-              promptEnglish: true,
-            },
-          },
-          answer: {
-            select: {
-              termEnglish: true,
-            },
-          },
         },
       },
     },

@@ -303,19 +303,7 @@ export async function recordPrebuiltQuizAnswer(
 
   const pointsEarned = isCorrect ? pointsPerQuestion : 0;
 
-  // Record the answer in PrebuiltQuizAnswer table
-  await prisma.prebuiltQuizAnswer.create({
-    data: {
-      attemptId,
-      questionId,
-      answerId,
-      isCorrect,
-      pointsEarned,
-      answeredAt: new Date(),
-    },
-  });
-
-  await updatePrebuiltAttemptProgress(attemptId);
+  await updatePrebuiltAttemptProgress(attemptId, isCorrect, pointsEarned);
 
   return { isCorrect, pointsEarned };
 }
@@ -323,11 +311,10 @@ export async function recordPrebuiltQuizAnswer(
 /**
  * Update attempt progress and award points/badges when complete
  */
-async function updatePrebuiltAttemptProgress(attemptId: string): Promise<void> {
+async function updatePrebuiltAttemptProgress(attemptId: string, isCorrect: boolean, pointsEarned: number): Promise<void> {
   const attempt = await prisma.userQuizAttempt.findUnique({
     where: { id: attemptId },
     include: {
-      prebuiltAnswers: true,
       prebuiltQuiz: true,
     },
   });
@@ -336,9 +323,10 @@ async function updatePrebuiltAttemptProgress(attemptId: string): Promise<void> {
     throw new Error("Attempt not found");
   }
 
-  const questionsAnswered = attempt.prebuiltAnswers.length;
-  const questionsCorrect = attempt.prebuiltAnswers.filter((a) => a.isCorrect).length;
-  const pointsEarned = attempt.prebuiltAnswers.reduce((sum, a) => sum + a.pointsEarned, 0);
+  // Increment based on current answer
+  const questionsAnswered = attempt.questionsAnswered + 1;
+  const questionsCorrect = attempt.questionsCorrect + (isCorrect ? 1 : 0);
+  const totalPointsEarned = attempt.pointsEarned + pointsEarned;
 
   const percentComplete = Math.round((questionsAnswered / attempt.totalQuestions) * 100);
   const percentCorrect = questionsAnswered > 0
@@ -358,7 +346,7 @@ async function updatePrebuiltAttemptProgress(attemptId: string): Promise<void> {
     data: {
       questionsAnswered,
       questionsCorrect,
-      pointsEarned,
+      pointsEarned: totalPointsEarned,
       percentComplete,
       percentCorrect,
       completed,
@@ -372,12 +360,12 @@ async function updatePrebuiltAttemptProgress(attemptId: string): Promise<void> {
       where: { id: attempt.userId },
       data: {
         score: {
-          increment: pointsEarned,
+          increment: totalPointsEarned,
         },
       },
     });
 
-    await addWeeklyScore(attempt.userId, pointsEarned);
+    await addWeeklyScore(attempt.userId, totalPointsEarned);
 
     // Award badges and update apprenticeship progress
     await awardBadgesForCompletion(
