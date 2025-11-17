@@ -297,7 +297,6 @@ export async function getPrebuiltQuizAttempt(c: Context) {
       },
       orderBy: { startedAt: 'desc' },
       include: {
-        prebuiltAnswers: true,
         prebuiltQuiz: true,
       },
     });
