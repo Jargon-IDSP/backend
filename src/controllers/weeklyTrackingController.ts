@@ -415,3 +415,183 @@ export async function getFriendsWeeklyStats(c: Context) {
     }, 500);
   }
 }
+
+// Get user's rank for a specific week
+export async function getUserRankForWeek(userId: string, weekStartDate: Date): Promise<number | null> {
+  const userStats = await prisma.userWeeklyStats.findUnique({
+    where: {
+      userId_weekStartDate: {
+        userId,
+        weekStartDate,
+      },
+    },
+  });
+
+  if (!userStats || userStats.weeklyScore === 0) return null;
+
+  const usersAbove = await prisma.userWeeklyStats.count({
+    where: {
+      weekStartDate,
+      OR: [
+        { weeklyScore: { gt: userStats.weeklyScore } },
+        {
+          weeklyScore: userStats.weeklyScore,
+          updatedAt: { lt: userStats.updatedAt },
+        },
+      ],
+    },
+  });
+
+  return usersAbove + 1;
+}
+
+// Get user's medal counts and weekly placements
+export async function getUserMedalsAndPlacements(userId: string, weeksBack: number = 12) {
+  const currentWeekStart = getCurrentWeekStart();
+  const startDate = new Date(currentWeekStart);
+  startDate.setDate(startDate.getDate() - (weeksBack * 7));
+  
+  // Get all weekly stats for the user
+  const userStats = await prisma.userWeeklyStats.findMany({
+    where: {
+      userId,
+      weekStartDate: {
+        gte: startDate,
+      },
+    },
+    orderBy: {
+      weekStartDate: 'desc',
+    },
+  });
+
+  // If user has no stats, return empty results
+  if (userStats.length === 0) {
+    return {
+      medals: {
+        gold: 0,
+        silver: 0,
+        bronze: 0,
+      },
+      placements: [],
+    };
+  }
+
+  // Get all weekly stats for all users in the same weeks to calculate ranks
+  const weekStartDates = userStats.map(s => s.weekStartDate);
+  
+  const allWeeklyStats = await prisma.userWeeklyStats.findMany({
+    where: {
+      weekStartDate: {
+        in: weekStartDates,
+      },
+      weeklyScore: {
+        gt: 0,
+      },
+    },
+    orderBy: [
+      { weekStartDate: 'desc' },
+      { weeklyScore: 'desc' },
+      { updatedAt: 'asc' },
+    ],
+  });
+
+  // Group stats by week and calculate ranks
+  const weeklyRanks = new Map<string, number | null>();
+  const weekGroups = new Map<string, typeof allWeeklyStats>();
+  
+  for (const stat of allWeeklyStats) {
+    const weekKey = stat.weekStartDate.toISOString();
+    if (!weekGroups.has(weekKey)) {
+      weekGroups.set(weekKey, []);
+    }
+    weekGroups.get(weekKey)!.push(stat);
+  }
+
+  // Calculate ranks for each week
+  // Stats are already sorted by weeklyScore desc, updatedAt asc
+  for (const [weekKey, stats] of weekGroups.entries()) {
+    // Find user's index in the sorted list
+    const userIndex = stats.findIndex(s => s.userId === userId);
+    
+    if (userIndex === -1) {
+      // User not found in this week (didn't participate or had 0 score)
+      weeklyRanks.set(weekKey, null);
+    } else {
+      // Rank is simply index + 1 (since list is sorted by score descending)
+      // Ties are already handled by updatedAt sorting
+      weeklyRanks.set(weekKey, userIndex + 1);
+    }
+  }
+
+  // Count medals
+  let goldCount = 0;
+  let silverCount = 0;
+  let bronzeCount = 0;
+
+  // Get placements for each week
+  const placements = userStats.map(stat => {
+    const weekKey = stat.weekStartDate.toISOString();
+    const rank = weeklyRanks.get(weekKey) || null;
+    
+    if (rank === 1) goldCount++;
+    else if (rank === 2) silverCount++;
+    else if (rank === 3) bronzeCount++;
+
+    // Calculate week end date (Sunday) - create a new date to avoid mutation
+    const weekStart = new Date(stat.weekStartDate);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    return {
+      weekStartDate: stat.weekStartDate.toISOString(),
+      weekEndDate: weekEnd.toISOString(),
+      rank,
+      weeklyScore: stat.weeklyScore,
+    };
+  });
+
+  return {
+    medals: {
+      gold: goldCount,
+      silver: silverCount,
+      bronze: bronzeCount,
+    },
+    placements,
+  };
+}
+
+export async function getSelfLeaderboard(c: Context) {
+  try {
+    const userId = c.get('user')?.id;
+    
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const weeksBack = parseInt(c.req.query('weeks') || '12');
+    
+    console.log(`Fetching self leaderboard for user ${userId}, weeks back: ${weeksBack}`);
+    
+    const data = await getUserMedalsAndPlacements(userId, weeksBack);
+
+    console.log(`Self leaderboard data:`, {
+      medals: data.medals,
+      placementsCount: data.placements.length
+    });
+
+    return c.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching self leaderboard:', error);
+    if (error instanceof Error) {
+      console.error('Error stack:', error.stack);
+    }
+    return c.json({
+      success: false,
+      message: 'Failed to fetch self leaderboard',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}

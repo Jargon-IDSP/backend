@@ -5,7 +5,8 @@ import {
   getLeaderboard,
   getWeeklyHistory,
   getStatistics,
-  getFriendsWeeklyStats
+  getFriendsWeeklyStats,
+  getSelfLeaderboard
 } from '../controllers/weeklyTrackingController';
 
 const weeklyStatsRoute = new Hono();
@@ -21,5 +22,7 @@ weeklyStatsRoute.get('/history', getWeeklyHistory);
 weeklyStatsRoute.get('/statistics', getStatistics);
 
 weeklyStatsRoute.get('/friends', getFriendsWeeklyStats);
+
+weeklyStatsRoute.get('/self', getSelfLeaderboard);
 
 export default weeklyStatsRoute;
