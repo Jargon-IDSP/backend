@@ -16,6 +16,7 @@ import weeklyStatsRoute from "./routes/weeklyStatsRoute";
 import categoryRoute from "./routes/categoryRoute";
 import lessonRequestRoute from "./routes/lessonRequestRoute";
 import { notificationRoute } from "./routes/notificationRoute";
+import { avatarRoute } from "./routes/avatarRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
@@ -69,6 +70,7 @@ app.get("/admin/clear-cache", async (c) => {
 app.route("/api", userRoutes);
 app.route("/chat", chatRoute);
 app.route("/profile", profileRoute);
+app.route("/avatar", avatarRoute);
 app.route("/documents", documentRoute);
 app.route("/webhooks", webhookRoute);
 app.route("/leaderboard", leaderboardRoute);
