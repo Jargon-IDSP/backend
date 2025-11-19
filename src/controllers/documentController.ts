@@ -723,10 +723,7 @@ export async function generateFlashcardsFull(
       categoryId
     );
 
-    // Batch database writes to prevent transaction timeouts on large documents
-    const BATCH_SIZE = 10; // Process 10 items at a time
-
-    // First, create document update and quiz in one transaction
+    // Single transaction (OLD FAST VERSION) - no batching needed for 10 items
     await prisma.$transaction([
       prisma.document.update({
         where: { id: documentId },
@@ -735,94 +732,19 @@ export async function generateFlashcardsFull(
       prisma.customQuiz.create({
         data: quizData
       }),
+      ...flashcardData.map((data) => prisma.customFlashcard.create({ data })),
+      ...questionData.map((data) => prisma.customQuestion.create({ data })),
     ]);
 
-    // Batch flashcard inserts
-    for (let i = 0; i < flashcardData.length; i += BATCH_SIZE) {
-      const batch = flashcardData.slice(i, i + BATCH_SIZE);
-      await prisma.$transaction(
-        batch.map((data) => prisma.customFlashcard.create({ data }))
-      );
-      console.log(`💾 Saved flashcards batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(flashcardData.length / BATCH_SIZE)}`);
-    }
-
-    // Batch question inserts
-    for (let i = 0; i < questionData.length; i += BATCH_SIZE) {
-      const batch = questionData.slice(i, i + BATCH_SIZE);
-      await prisma.$transaction(
-        batch.map((data) => prisma.customQuestion.create({ data }))
-      );
-      console.log(`💾 Saved questions batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(questionData.length / BATCH_SIZE)}`);
-    }
-
-    console.log(
-      `✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database (batched)\n`
-    );
-
-    // Optimized: Verify the data exists using simple count queries (much faster than full fetch)
-    console.log("🔍 Verifying database records are visible...");
-    const [quizExists, questionCount, flashcardCount] = await Promise.all([
-      prisma.customQuiz.count({ where: { id: quizData.id, documentId: documentId } }),
-      prisma.customQuestion.count({ where: { customQuizId: quizData.id } }),
-      prisma.customFlashcard.count({ where: { documentId: documentId } })
-    ]);
-
-    if (quizExists === 0 || questionCount === 0 || flashcardCount === 0) {
-      console.error("⚠️ Database verification failed - records not visible yet!");
-      console.error(`Quiz: ${quizExists > 0 ? 'found' : 'NOT FOUND'}`);
-      console.error(`Questions: ${questionCount}`);
-      console.error(`Flashcards: ${flashcardCount}`);
-      // Wait a moment and try again
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const [retryQuizExists, retryQuestionCount, retryFlashcardCount] = await Promise.all([
-        prisma.customQuiz.count({ where: { id: quizData.id } }),
-        prisma.customQuestion.count({ where: { customQuizId: quizData.id } }),
-        prisma.customFlashcard.count({ where: { documentId: documentId } })
-      ]);
-
-      if (retryQuizExists === 0 || retryQuestionCount === 0 || retryFlashcardCount === 0) {
-        throw new Error("Database records not visible after transaction - data integrity issue");
-      }
-      console.log("✅ Database records verified on retry");
-    } else {
-      console.log(`✅ Database records verified: ${questionCount} questions, ${flashcardCount} flashcards`);
-    }
-
-    await redisClient.del(quickCacheKey);
+    console.log(`✅ Saved ${flashcardData.length} flashcards and ${questionData.length} questions to database`);
 
     console.log("🔄 Invalidating caches after flashcard generation...");
     await Promise.all([
-      // Pattern-based invalidations (with wildcards - require KEYS scan)
       invalidateCachePattern(`custom:user:${userId}:*`),
-      invalidateCachePattern(`custom:document:${documentId}:*`),
-      invalidateCachePattern(`questions:user:${userId}:*`),
-      invalidateCachePattern(`questions:document:${documentId}:*`),
-      invalidateCachePattern(`quizzes:user:${userId}:*`),
-      // Optimized: Batch delete specific keys (no wildcards - faster O(1) operation)
-      redisClient.del([
-        `document:status:${documentId}`,
-        `documents:user:${userId}`,
-        `documents:category:${userId}:${categoryId}`,
-        `categories:all:${userId}`
-      ])
+      invalidateCachePattern(`documents:user:${userId}`),
+      invalidateCachePattern(`documents:category:${userId}:${categoryId}`)
     ]);
     console.log("✅ Cache invalidation complete");
-
-    // Optimized: Create notification in background (non-blocking - saves ~50-100ms)
-    createNotification({
-      userId,
-      type: "DOCUMENT_READY",
-      title: "Document Ready!",
-      message: `Your document "${document.filename}" has been fully processed and saved to your profile.`,
-      actionUrl: `/learning/documents/${documentId}/study`,
-      documentId,
-    })
-      .then(() => console.log("📬 Document completion notification created"))
-      .catch((notifError) => {
-        console.error("Failed to create notification:", notifError);
-        // Don't fail the whole process if notification fails
-      });
 
     console.log(`${"=".repeat(60)}`);
     console.log(`✨ FLASHCARD GENERATION COMPLETE FOR ${documentId}`);

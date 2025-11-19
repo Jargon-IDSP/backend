@@ -341,8 +341,32 @@ translationWorker.on("progress", (job, progress) => {
 flashcardWorker.on("completed", async (job) => {
   console.log(`✅ Flashcard job ${job.id} completed successfully`);
 
-  // Note: Notification is now created in generateFlashcardsFull() in documentController.ts
-  // to ensure it's only sent once with the correct information
+  const { documentId, userId } = job.data;
+
+  try {
+    // Fetch document details for notification
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { filename: true },
+    });
+
+    // Create success notification
+    await createNotification({
+      userId,
+      type: "DOCUMENT_READY",
+      title: "All Languages Saved!",
+      message: `Your document "${
+        document?.filename || "Unknown"
+      }" is now fully processed with all 6 languages and saved to your profile.`,
+      actionUrl: `/learning/documents/${documentId}/study`,
+      documentId,
+    });
+
+    console.log(`📬 Success notification created for document ${documentId}`);
+  } catch (notifError) {
+    console.error("Failed to create success notification:", notifError);
+    // Don't throw - notification failure shouldn't break the completion
+  }
 });
 
 flashcardWorker.on("failed", async (job, err) => {
