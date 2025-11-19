@@ -253,6 +253,60 @@ export async function trackUserActivity(userId: string): Promise<void> {
   }
 }
 
+export async function getRollingWeekActivity(userId: string): Promise<string[]> {
+  const today = getPSTDate();
+  const daysArray = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Calculate the date range (3 days back to 3 days forward)
+  const startDate = new Date(today);
+  startDate.setDate(today.getDate() - 3);
+  startDate.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(today);
+  endDate.setDate(today.getDate() + 3);
+  endDate.setHours(23, 59, 59, 999);
+
+  // Determine which weeks we need to query
+  const currentWeekStart = getCurrentWeekStart();
+  const previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+
+  // Query both current and previous week stats
+  const weekStats = await prisma.userWeeklyStats.findMany({
+    where: {
+      userId,
+      weekStartDate: {
+        in: [previousWeekStart, currentWeekStart]
+      }
+    }
+  });
+
+  // Combine active days from both weeks
+  const allActiveDays = new Set<string>();
+  weekStats.forEach(stat => {
+    if (stat.daysActive) {
+      const days = stat.daysActive.split(',').filter(d => d);
+      days.forEach(day => allActiveDays.add(day));
+    }
+  });
+
+  // Build the rolling 7-day window and filter by active days
+  const rollingActiveDays: string[] = [];
+  for (let i = -3; i <= 3; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+
+    const dayAbbr = getDayAbbreviation(date);
+
+    // Only include days that are in the past or today (not future)
+    if (i <= 0 && allActiveDays.has(dayAbbr)) {
+      rollingActiveDays.push(dayAbbr);
+    }
+  }
+
+  return rollingActiveDays;
+}
+
 // Route Handlers (Context-based)
 import type { Context } from 'hono';
 
@@ -290,6 +344,36 @@ export async function getCurrentWeeklyStats(c: Context) {
     return c.json({
       success: false,
       message: 'Failed to fetch weekly stats',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getRollingWeek(c: Context) {
+  try {
+    const userId = c.get('user')?.id;
+
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    // Mark today as active when user checks their stats
+    await markDayActive(userId);
+
+    const activeDays = await getRollingWeekActivity(userId);
+
+    return c.json({
+      success: true,
+      data: {
+        daysActive: activeDays,
+        daysActiveCount: activeDays.length,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching rolling week stats:', error);
+    return c.json({
+      success: false,
+      message: 'Failed to fetch rolling week stats',
       error: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
