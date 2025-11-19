@@ -14,6 +14,7 @@ export const profile = async (c: Context) => {
       firstName: true,
       lastName: true,
       username: true,
+      imageUrl: true,
       language: true,
       industryId: true,
       introductionViewed: true,

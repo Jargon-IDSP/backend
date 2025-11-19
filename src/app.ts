@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { chatRoute } from "./routes/chatRoute";
 import { profileRoute } from "./routes/profileRoute";
 import { documentRoute } from "./routes/documentRoute";
@@ -29,6 +30,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
+      "http://localhost:5174",
       "http://localhost:3000",
       "https://frontend-cl3c.onrender.com",
       "https://www.jargon-app.ca",
@@ -43,6 +45,9 @@ app.use(
 );
 
 // Redis connection is now handled in index.ts before server starts
+
+// Serve static files from uploads directory
+app.use('/uploads/*', serveStatic({ root: './' }));
 
 // Health check endpoint (useful for monitoring)
 app.get("/", (c) =>

@@ -438,6 +438,7 @@ model User {
   firstName           String?
   lastName            String?
   username            String?
+  imageUrl            String?
   language            String            @default("english")
   industryId          Int               @default(6) // Default to "general" industry
   onboardingCompleted Boolean           @default(false)
