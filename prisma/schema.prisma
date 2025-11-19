@@ -476,21 +476,22 @@ model User {
 }
 
 model UserAvatar {
-  id          String   @id @default(cuid())
-  userId      String   @unique
-  body        String   @default("body-1")
-  expression  String?
-  hair        String?
-  headwear    String?
-  eyewear     String?
-  facial      String?
-  clothing    String?
-  shoes       String?
-  accessories String?  @db.Text // JSON array of additional accessories
-  unlockedItems String? @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  body          String   @default("body-1")
+  bodyColor     String?  @default("#FFB6C1")
+  expression    String?
+  hair          String?
+  headwear      String?
+  eyewear       String?
+  facial        String?
+  clothing      String?
+  shoes         String?
+  accessories   String?  @db.Text // JSON array of additional accessories
+  unlockedItems String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("user_avatars")

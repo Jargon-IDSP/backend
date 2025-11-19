@@ -4,5 +4,5 @@ import { authMiddleware } from "../middleware/authMiddleware";
 
 export const avatarRoute = new Hono()
   .use("*", authMiddleware)
-  .get("/avatar", avatar)
-  .put("/avatar", updateAvatar);
+  .get("/edit", avatar)
+  .put("/edit", updateAvatar);
