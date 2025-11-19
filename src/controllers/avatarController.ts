@@ -3,40 +3,40 @@ import { prisma } from "../lib/prisma";
 
 export const avatar = async (c: Context) => {
   const user = c.get("user");
-  
+
   let userAvatar = await prisma.userAvatar.findUnique({
     where: { userId: user.id }
   });
-  
+
   if (!userAvatar) {
     userAvatar = await prisma.userAvatar.create({
       data: {
         userId: user.id,
-        character: "rocky",
-        outfit: "default",
-        primaryColor: "#FFB6C1",
-        secondaryColor: "#FF69B4",
-        accentColor: "#FFC0CB",
+        body: "body-1",
+        expression: null,
+        hair: null,
+        headwear: null,
+        eyewear: null,
+        facial: null,
+        clothing: null,
+        shoes: null,
+        accessories: null,
         unlockedItems: "[]"
       }
     });
   }
-  
-  return c.json({ 
+
+  return c.json({
     avatarConfig: {
-      character: userAvatar.character,
-      outfit: userAvatar.outfit,
-      hatType: userAvatar.hatType,
-      accessories: [
-        userAvatar.accessory1,
-        userAvatar.accessory2,
-        userAvatar.accessory3
-      ].filter(Boolean),
-      colors: {
-        primary: userAvatar.primaryColor,
-        secondary: userAvatar.secondaryColor,
-        accent: userAvatar.accentColor
-      },
+      body: userAvatar.body,
+      expression: userAvatar.expression,
+      hair: userAvatar.hair,
+      headwear: userAvatar.headwear,
+      eyewear: userAvatar.eyewear,
+      facial: userAvatar.facial,
+      clothing: userAvatar.clothing,
+      shoes: userAvatar.shoes,
+      accessories: userAvatar.accessories ? JSON.parse(userAvatar.accessories) : [],
       unlockedItems: JSON.parse(userAvatar.unlockedItems || "[]")
     }
   }, 200);
@@ -45,42 +45,55 @@ export const avatar = async (c: Context) => {
 export const updateAvatar = async (c: Context) => {
   const user = c.get("user");
   const body = await c.req.json();
-  
+
   try {
     const updatedAvatar = await prisma.userAvatar.upsert({
       where: { userId: user.id },
       update: {
-        outfit: body.outfit,
-        hatType: body.hatType,
-        accessory1: body.accessories?.[0] || null,
-        accessory2: body.accessories?.[1] || null,
-        accessory3: body.accessories?.[2] || null,
-        primaryColor: body.colors?.primary,
-        secondaryColor: body.colors?.secondary,
-        accentColor: body.colors?.accent,
+        body: body.body,
+        expression: body.expression || null,
+        hair: body.hair || null,
+        headwear: body.headwear || null,
+        eyewear: body.eyewear || null,
+        facial: body.facial || null,
+        clothing: body.clothing || null,
+        shoes: body.shoes || null,
+        accessories: body.accessories ? JSON.stringify(body.accessories) : null,
       },
       create: {
         userId: user.id,
-        character: "rocky",
-        outfit: body.outfit || "default",
-        hatType: body.hatType,
-        accessory1: body.accessories?.[0],
-        accessory2: body.accessories?.[1],
-        accessory3: body.accessories?.[2],
-        primaryColor: body.colors?.primary || "#FFB6C1",
-        secondaryColor: body.colors?.secondary || "#FF69B4",
-        accentColor: body.colors?.accent || "#FFC0CB",
+        body: body.body || "body-1",
+        expression: body.expression || null,
+        hair: body.hair || null,
+        headwear: body.headwear || null,
+        eyewear: body.eyewear || null,
+        facial: body.facial || null,
+        clothing: body.clothing || null,
+        shoes: body.shoes || null,
+        accessories: body.accessories ? JSON.stringify(body.accessories) : null,
         unlockedItems: "[]"
       }
     });
-    
-    return c.json({ 
-      success: true, 
-      avatar: updatedAvatar 
+
+    return c.json({
+      success: true,
+      avatarConfig: {
+        body: updatedAvatar.body,
+        expression: updatedAvatar.expression,
+        hair: updatedAvatar.hair,
+        headwear: updatedAvatar.headwear,
+        eyewear: updatedAvatar.eyewear,
+        facial: updatedAvatar.facial,
+        clothing: updatedAvatar.clothing,
+        shoes: updatedAvatar.shoes,
+        accessories: updatedAvatar.accessories ? JSON.parse(updatedAvatar.accessories) : [],
+        unlockedItems: JSON.parse(updatedAvatar.unlockedItems || "[]")
+      }
     }, 200);
   } catch (error) {
-    return c.json({ 
-      error: "Failed to update avatar" 
+    console.error("Failed to update avatar:", error);
+    return c.json({
+      error: "Failed to update avatar"
     }, 500);
   }
 };
