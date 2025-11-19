@@ -122,13 +122,13 @@ export async function extractTermsAndQuestions(
   existingDbTermsEnglish: string[]
 ): Promise<ExtractionResponse> {
   const extractionPrompt = `
-From the OCR text, you MUST select EXACTLY 25 DISTINCT, meaningful terms.
+From the OCR text, you MUST select EXACTLY 15 DISTINCT, meaningful terms.
 
 CRITICAL: Avoid these terms that the user already knows: ${existingDbTermsEnglish.slice(0, 200).join(", ")}
 
-IMPORTANT: You must return exactly 25 terms and 25 questions.
+IMPORTANT: You must return exactly 15 terms and 15 questions.
 - First, extract terms that appear directly in the document
-- If fewer than 25 terms are found, generate additional relevant terms related to the document's topic to reach exactly 25 terms
+- If fewer than 15 terms are found, generate additional relevant terms related to the document's topic to reach exactly 15 terms
 - For example, if a document mentions "PPE" and "hard hat", you could add related terms like "safety goggles", "steel-toed boots", "high-visibility vest", etc.
 - DO NOT include any terms from the "user already knows" list above
 
@@ -142,7 +142,7 @@ For each term provide:
    - Professional: Career development, industry standards, professional conduct, ethics
    - General: Basic concepts that don't fit other categories
 
-Also produce EXACTLY 25 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
+Also produce EXACTLY 15 question prompts (one per term) where the correct answer is exactly one of your selected terms. Do NOT include the exact term in the prompt text.
 
 Return STRICT JSON ONLY:
 {
