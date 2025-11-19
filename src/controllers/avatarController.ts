@@ -13,6 +13,7 @@ export const avatar = async (c: Context) => {
       data: {
         userId: user.id,
         body: "body-1",
+        bodyColor: "#FFB6C1",
         expression: null,
         hair: null,
         headwear: null,
@@ -29,6 +30,7 @@ export const avatar = async (c: Context) => {
   return c.json({
     avatarConfig: {
       body: userAvatar.body,
+      bodyColor: userAvatar.bodyColor,
       expression: userAvatar.expression,
       hair: userAvatar.hair,
       headwear: userAvatar.headwear,
@@ -51,6 +53,7 @@ export const updateAvatar = async (c: Context) => {
       where: { userId: user.id },
       update: {
         body: body.body,
+        bodyColor: body.bodyColor || null,
         expression: body.expression || null,
         hair: body.hair || null,
         headwear: body.headwear || null,
@@ -63,6 +66,7 @@ export const updateAvatar = async (c: Context) => {
       create: {
         userId: user.id,
         body: body.body || "body-1",
+        bodyColor: body.bodyColor || "#FFB6C1",
         expression: body.expression || null,
         hair: body.hair || null,
         headwear: body.headwear || null,
@@ -79,6 +83,7 @@ export const updateAvatar = async (c: Context) => {
       success: true,
       avatarConfig: {
         body: updatedAvatar.body,
+        bodyColor: updatedAvatar.bodyColor,
         expression: updatedAvatar.expression,
         hair: updatedAvatar.hair,
         headwear: updatedAvatar.headwear,
