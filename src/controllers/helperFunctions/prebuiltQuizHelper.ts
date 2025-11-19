@@ -396,6 +396,41 @@ async function awardBadgesForCompletion(
     return;
   }
 
+  // Check if this is the first time passing this specific quiz number
+  // Get the prebuilt quiz ID for this level/industry/quizNumber
+  const prebuiltQuiz = await prisma.prebuiltQuiz.findUnique({
+    where: {
+      levelId_industryId_quizNumber: {
+        levelId,
+        industryId: industryId || null,
+        quizNumber,
+      },
+    },
+  });
+
+  if (!prebuiltQuiz) {
+    console.log(`Prebuilt quiz not found for level ${levelId}, industry ${industryId}, quiz ${quizNumber}`);
+    return;
+  }
+
+  // Count how many times user has passed this quiz
+  // Note: The current attempt is already saved, so count includes it
+  const passingAttemptsCount = await prisma.userQuizAttempt.count({
+    where: {
+      userId,
+      prebuiltQuizId: prebuiltQuiz.id,
+      completed: true,
+      percentCorrect: prebuiltQuiz.passingScore ? {
+        gte: prebuiltQuiz.passingScore,
+      } : undefined,
+    },
+  });
+
+  // Only increment if this is the first time passing this specific quiz
+  const shouldIncrementCounter = passingAttemptsCount === 1;
+
+  console.log(`Quiz completion check: Level ${levelId}, Quiz ${quizNumber}, Passing attempts: ${passingAttemptsCount}, First pass: ${shouldIncrementCounter}`);
+
   // Update apprenticeship progress
   const progress = await prisma.userApprenticeshipProgress.upsert({
     where: {
@@ -405,11 +440,11 @@ async function awardBadgesForCompletion(
         industryId: industryId || null,
       },
     },
-    update: {
+    update: shouldIncrementCounter ? {
       quizzesCompleted: {
         increment: 1,
       },
-    },
+    } : {},
     create: {
       userId,
       levelId,

@@ -1172,7 +1172,7 @@ export const getDownloadUrl = async (c: Context) => {
 
     const downloadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
 
-    return c.json({ downloadUrl });
+    return c.json({ success: true, data: { downloadUrl } });
   } catch (error) {
     console.error("Get download URL error:", error);
     return c.json({ error: String(error) }, 500);
