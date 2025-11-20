@@ -696,6 +696,29 @@ export const getCustomFlashcardsByUser = async (c: Context) => {
   }
 };
 
+export const getCustomFlashcardStats = async (c: Context) => {
+  try {
+    const user = c.get("user");
+
+    if (!user || !user.id) {
+      return errorResponse(c, "User not authenticated", 401);
+    }
+
+    const count = await prisma.customFlashcard.count({
+      where: { userId: user.id },
+    });
+
+    return c.json(successResponse({ count }));
+  } catch (error: any) {
+    console.error("Error fetching custom flashcard stats:", error);
+    return errorResponse(
+      c,
+      error.message || "Failed to fetch custom flashcard stats",
+      500
+    );
+  }
+};
+
 export const getRandomCustomFlashcard = async (c: Context) => {
   try {
     const userId = c.req.param("userId");

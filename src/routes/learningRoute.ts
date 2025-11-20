@@ -12,6 +12,7 @@ import {
   getCustomFlashcardsByUser,
   getCustomFlashcardsByCategory,
   getRandomCustomFlashcard,
+  getCustomFlashcardStats,
 } from "../controllers/flashcardController";
 
 import {
@@ -96,6 +97,7 @@ const customRoutes = new Hono()
   .get("/categories/:category/quizzes", getCustomQuizzesByCategory)
   .get("/quizzes/by-category/:category", getDocumentsByCategory)
 
+  .get("/terms/stats", getCustomFlashcardStats)
   .get("/terms", getCustomFlashcardsByUser)
   .get("/questions", getCustomQuestionsByUser)
   .get("/quizzes", getCustomQuizzesByUser)
