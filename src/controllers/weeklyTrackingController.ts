@@ -349,6 +349,84 @@ export async function getCurrentWeeklyStats(c: Context) {
   }
 }
 
+export async function getMonthlyActivity(c: Context) {
+  try {
+    const user = c.get("user");
+    const userId = user?.id;
+
+    if (!userId) {
+      return c.json({ success: false, error: "Unauthorized" }, 401);
+    }
+
+    // Get current date in PST
+    const now = getPSTDate();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Calculate start date (5 months ago, first day of that month)
+    const startDate = new Date(currentYear, currentMonth - 4, 1);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get all weekly stats for the past 5 months
+    const weeklyStats = await prisma.userWeeklyStats.findMany({
+      where: {
+        userId,
+        weekStartDate: {
+          gte: startDate,
+        },
+      },
+      orderBy: {
+        weekStartDate: 'asc',
+      },
+    });
+
+    // Group stats by month and count active days
+    const monthlyData: Array<{ month: string; year: number; daysActive: number; maxDays: number }> = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    // Initialize months (5 months: 4 past + current)
+    for (let i = -4; i <= 0; i++) {
+      const monthDate = new Date(currentYear, currentMonth + i, 1);
+      const month = monthDate.getMonth();
+      const year = monthDate.getFullYear();
+      const monthKey = `${year}-${month}`;
+
+      // Count days in this month
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      // Filter weekly stats for this month
+      const monthStats = weeklyStats.filter(stat => {
+        const statDate = new Date(stat.weekStartDate);
+        return statDate.getMonth() === month && statDate.getFullYear() === year;
+      });
+
+      // Count total active days across all weeks in this month
+      let totalActiveDays = 0;
+      monthStats.forEach(stat => {
+        if (stat.daysActive) {
+          const days = stat.daysActive.split(',').filter(d => d.trim());
+          totalActiveDays += days.length;
+        }
+      });
+
+      monthlyData.push({
+        month: monthNames[month],
+        year,
+        daysActive: totalActiveDays,
+        maxDays: daysInMonth,
+      });
+    }
+
+    return c.json({
+      success: true,
+      data: monthlyData,
+    });
+  } catch (error) {
+    console.error("Error fetching monthly activity:", error);
+    return c.json({ success: false, error: "Failed to fetch monthly activity" }, 500);
+  }
+}
+
 export async function getRollingWeek(c: Context) {
   try {
     const userId = c.get('user')?.id;
