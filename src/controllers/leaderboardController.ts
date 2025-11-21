@@ -12,6 +12,20 @@ export const getLeaderboard = async (c: Context) => {
         language: true,
         email: true,
         createdAt: true,
+        avatar: {
+          select: {
+            body: true,
+            bodyColor: true,
+            expression: true,
+            hair: true,
+            headwear: true,
+            eyewear: true,
+            facial: true,
+            clothing: true,
+            shoes: true,
+            accessories: true,
+          },
+        },
       },
       orderBy: {
         score: 'desc',
@@ -73,6 +87,20 @@ export const getFriendsLeaderboard = async (c: Context) => {
         language: true,
         email: true,
         createdAt: true,
+        avatar: {
+          select: {
+            body: true,
+            bodyColor: true,
+            expression: true,
+            hair: true,
+            headwear: true,
+            eyewear: true,
+            facial: true,
+            clothing: true,
+            shoes: true,
+            accessories: true,
+          },
+        },
       },
     });
 
@@ -87,6 +115,20 @@ export const getFriendsLeaderboard = async (c: Context) => {
         language: true,
         email: true,
         createdAt: true,
+        avatar: {
+          select: {
+            body: true,
+            bodyColor: true,
+            expression: true,
+            hair: true,
+            headwear: true,
+            eyewear: true,
+            facial: true,
+            clothing: true,
+            shoes: true,
+            accessories: true,
+          },
+        },
       },
     });
 

@@ -22,6 +22,20 @@ export const profile = async (c: Context) => {
       defaultPrivacy: true,
       createdAt: true,
       updatedAt: true,
+      avatar: {
+        select: {
+          body: true,
+          bodyColor: true,
+          expression: true,
+          hair: true,
+          headwear: true,
+          eyewear: true,
+          facial: true,
+          clothing: true,
+          shoes: true,
+          accessories: true,
+        },
+      },
     }
   });
 
