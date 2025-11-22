@@ -20,6 +20,10 @@ export const profile = async (c: Context) => {
       onboardingCompleted: true,
       score: true,
       defaultPrivacy: true,
+      linkedinUrl: true,
+      facebookUrl: true,
+      instagramUrl: true,
+      indeedUrl: true,
       createdAt: true,
       updatedAt: true,
       avatar: {
@@ -164,5 +168,47 @@ export const markIntroductionViewed = async (c: Context) => {
   } catch (error) {
     console.error("Error marking introduction as viewed:", error);
     return c.json({ error: "Failed to update introduction status" }, 500);
+  }
+};
+
+export const updateSocialMedia = async (c: Context) => {
+  const user = c.get("user");
+
+  try {
+    const body = await c.req.json();
+    const { linkedinUrl, facebookUrl, instagramUrl, indeedUrl } = body;
+
+    const updateData: {
+      linkedinUrl?: string | null;
+      facebookUrl?: string | null;
+      instagramUrl?: string | null;
+      indeedUrl?: string | null;
+    } = {};
+
+    if (linkedinUrl !== undefined) updateData.linkedinUrl = linkedinUrl;
+    if (facebookUrl !== undefined) updateData.facebookUrl = facebookUrl;
+    if (instagramUrl !== undefined) updateData.instagramUrl = instagramUrl;
+    if (indeedUrl !== undefined) updateData.indeedUrl = indeedUrl;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+      select: {
+        id: true,
+        linkedinUrl: true,
+        facebookUrl: true,
+        instagramUrl: true,
+        indeedUrl: true,
+      }
+    });
+
+    return c.json({
+      message: "Social media links updated successfully",
+      user: updatedUser
+    }, 200);
+
+  } catch (error) {
+    console.error("Error updating social media links:", error);
+    return c.json({ error: "Failed to update social media links" }, 500);
   }
 };

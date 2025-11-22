@@ -88,7 +88,25 @@ app.get("/users/:id", async (c) => {
       score: true,
       industryId: true,
       defaultPrivacy: true,
+      linkedinUrl: true,
+      facebookUrl: true,
+      instagramUrl: true,
+      indeedUrl: true,
       createdAt: true,
+      avatar: {
+        select: {
+          body: true,
+          bodyColor: true,
+          expression: true,
+          hair: true,
+          headwear: true,
+          eyewear: true,
+          facial: true,
+          clothing: true,
+          shoes: true,
+          accessories: true,
+        },
+      },
     },
   });
 

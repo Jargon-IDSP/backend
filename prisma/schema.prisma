@@ -444,6 +444,10 @@ model User {
   introductionViewed  Boolean           @default(false)
   score               Int               @default(0)
   defaultPrivacy      PrivacyVisibility @default(PRIVATE)
+  linkedinUrl         String?
+  facebookUrl         String?
+  instagramUrl        String?
+  indeedUrl           String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 

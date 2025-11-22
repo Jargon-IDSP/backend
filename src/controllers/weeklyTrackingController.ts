@@ -725,15 +725,15 @@ export async function getUserMedalsAndPlacements(userId: string, weeksBack: numb
 export async function getSelfLeaderboard(c: Context) {
   try {
     const userId = c.get('user')?.id;
-    
+
     if (!userId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
     const weeksBack = parseInt(c.req.query('weeks') || '12');
-    
+
     console.log(`Fetching self leaderboard for user ${userId}, weeks back: ${weeksBack}`);
-    
+
     const data = await getUserMedalsAndPlacements(userId, weeksBack);
 
     console.log(`Self leaderboard data:`, {
@@ -753,6 +753,47 @@ export async function getSelfLeaderboard(c: Context) {
     return c.json({
       success: false,
       message: 'Failed to fetch self leaderboard',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function getUserLeaderboardForUser(c: Context) {
+  try {
+    const targetUserId = c.req.param('userId');
+    const requestingUserId = c.get('user')?.id;
+
+    if (!requestingUserId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    if (!targetUserId) {
+      return c.json({ error: 'User ID required' }, 400);
+    }
+
+    const weeksBack = parseInt(c.req.query('weeks') || '12');
+
+    console.log(`Fetching leaderboard for user ${targetUserId}, requested by ${requestingUserId}, weeks back: ${weeksBack}`);
+
+    const data = await getUserMedalsAndPlacements(targetUserId, weeksBack);
+
+    console.log(`User leaderboard data for ${targetUserId}:`, {
+      medals: data.medals,
+      placementsCount: data.placements.length
+    });
+
+    return c.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching user leaderboard:', error);
+    if (error instanceof Error) {
+      console.error('Error stack:', error.stack);
+    }
+    return c.json({
+      success: false,
+      message: 'Failed to fetch user leaderboard',
       error: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
