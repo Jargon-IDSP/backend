@@ -162,6 +162,20 @@ friendshipRoute.get("/", async (c: Context) => {
           score: true,
           industryId: true,
           language: true,
+          avatar: {
+            select: {
+              body: true,
+              bodyColor: true,
+              expression: true,
+              hair: true,
+              headwear: true,
+              eyewear: true,
+              facial: true,
+              clothing: true,
+              shoes: true,
+              accessories: true,
+            },
+          },
         },
       },
     },
@@ -195,6 +209,7 @@ friendshipRoute.get("/", async (c: Context) => {
       score: follow.following.score,
       industryId: follow.following.industryId,
       language: follow.following.language,
+      avatar: follow.following.avatar,
       friendshipId: follow.id,
       status: "FOLLOWING", // Always FOLLOWING since we're filtering for that status
       isMutual, // Add flag to indicate if it's mutual (friends)
