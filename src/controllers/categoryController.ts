@@ -1,12 +1,12 @@
 import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
-import redisClient from "../lib/redis";
+import redisClient, { connectRedis } from "../lib/redis";
 
 // Helper function to invalidate cache by pattern
 const invalidateCachePattern = async (pattern: string): Promise<void> => {
   try {
     if (!redisClient.isOpen) {
-      await redisClient.connect();
+      await connectRedis();
     }
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
