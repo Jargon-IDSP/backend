@@ -17,6 +17,7 @@ import categoryRoute from "./routes/categoryRoute";
 import lessonRequestRoute from "./routes/lessonRequestRoute";
 import { notificationRoute } from "./routes/notificationRoute";
 import { avatarRoute } from "./routes/avatarRoute";
+import { translateRoute } from "./routes/translateRoute";
 import { connectRedis } from "./lib/redis";
 import userRoutes from "./routes/users";
 
@@ -84,6 +85,7 @@ app.route("/weekly-tracking", weeklyStatsRoute);
 app.route("/categories", categoryRoute);
 app.route("/notifications", notificationRoute);
 app.route("/lesson-requests", lessonRequestRoute);
+app.route("/api", translateRoute);
 
 // 404 handler
 app.notFound((c) => c.json({ error: "Not Found" }, 404));
