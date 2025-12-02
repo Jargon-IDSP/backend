@@ -230,6 +230,7 @@ export const getFollowing = async (c: Context) => {
               select: {
                 body: true,
                 bodyColor: true,
+                hairColor: true,
                 expression: true,
                 hair: true,
                 headwear: true,
@@ -290,6 +291,7 @@ export const getFollowers = async (c: Context) => {
               select: {
                 body: true,
                 bodyColor: true,
+                hairColor: true,
                 expression: true,
                 hair: true,
                 headwear: true,
@@ -404,6 +406,7 @@ export const getFriends = async (c: Context) => {
               select: {
                 body: true,
                 bodyColor: true,
+                hairColor: true,
                 expression: true,
                 hair: true,
                 headwear: true,
@@ -531,6 +534,7 @@ export const searchUsers = async (c: Context) => {
           select: {
             body: true,
             bodyColor: true,
+            hairColor: true,
             expression: true,
             hair: true,
             headwear: true,
@@ -647,6 +651,7 @@ export const getFriendSuggestions = async (c: Context) => {
           select: {
             body: true,
             bodyColor: true,
+            hairColor: true,
             expression: true,
             hair: true,
             headwear: true,

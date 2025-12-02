@@ -484,6 +484,7 @@ model UserAvatar {
   userId        String   @unique
   body          String   @default("body-1")
   bodyColor     String?  @default("#FFB6C1")
+  hairColor     String?  @default("#512e14")
   expression    String?
   hair          String?
   headwear      String?

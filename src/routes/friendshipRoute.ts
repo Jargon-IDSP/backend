@@ -166,6 +166,7 @@ friendshipRoute.get("/", async (c: Context) => {
             select: {
               body: true,
               bodyColor: true,
+              hairColor: true,
               expression: true,
               hair: true,
               headwear: true,
