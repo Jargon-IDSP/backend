@@ -16,6 +16,7 @@ export const getLeaderboard = async (c: Context) => {
           select: {
             body: true,
             bodyColor: true,
+            hairColor: true,
             expression: true,
             hair: true,
             headwear: true,
@@ -91,6 +92,7 @@ export const getFriendsLeaderboard = async (c: Context) => {
           select: {
             body: true,
             bodyColor: true,
+            hairColor: true,
             expression: true,
             hair: true,
             headwear: true,
@@ -119,6 +121,7 @@ export const getFriendsLeaderboard = async (c: Context) => {
           select: {
             body: true,
             bodyColor: true,
+            hairColor: true,
             expression: true,
             hair: true,
             headwear: true,
