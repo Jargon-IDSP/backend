@@ -42,6 +42,9 @@ export const invalidateCachePattern = async (pattern: string): Promise<void> => 
     const keys = await redisClient.keys(pattern);
     if (keys.length > 0) {
       await redisClient.del(keys);
+      console.log(`🗑️  Invalidated ${keys.length} cache key(s) matching pattern: ${pattern}`, { keys });
+    } else {
+      console.log(`⚠️  No cache keys found matching pattern: ${pattern}`);
     }
   } catch (error) {
     console.error(`Error invalidating cache pattern ${pattern}:`, error);
@@ -1230,11 +1233,60 @@ export const updateDocument = async (c: Context) => {
     // Update document and associated data in a transaction
     const [updatedDocument] = await prisma.$transaction(transactionOps);
 
-    console.log("🔄 Invalidating caches after document update...");
+    // Get the final categoryId after update (in case it changed)
+    const finalCategoryId = updatedDocument.categoryId || oldCategoryId;
+
+    console.log("🔄 Invalidating caches after document update...", {
+      documentId: id,
+      filenameUpdated: !!updateData.filename,
+      categoryChanged: categoryId !== undefined && categoryId !== oldCategoryId,
+      oldCategoryId,
+      newCategoryId: categoryId,
+      finalCategoryId,
+    });
+
     const cacheInvalidations = [
       invalidateCachePattern(`documents:user:${user.id}`),
       invalidateCachePattern(`document:${id}`),
     ];
+
+    // If filename was updated, invalidate the category cache for the document's category
+    // (even if category didn't change, because the filename in the category list needs to update)
+    if (updateData.filename) {
+      // Invalidate the final categoryId (after update) to ensure we clear the right cache
+      if (finalCategoryId) {
+        const cacheKey = `documents:category:${user.id}:${finalCategoryId}`;
+        console.log(`🗑️  Invalidating category cache for filename update: ${cacheKey}`);
+        // Use both pattern matching and direct deletion to ensure cache is cleared
+        cacheInvalidations.push(
+          invalidateCachePattern(cacheKey),
+          (async () => {
+            try {
+              await redisClient.del(cacheKey);
+              console.log(`✅ Directly deleted cache key: ${cacheKey}`);
+            } catch (error) {
+              console.error(`Error directly deleting cache key ${cacheKey}:`, error);
+            }
+          })()
+        );
+      }
+      // Also invalidate old categoryId if it's different (in case category changed)
+      if (oldCategoryId && oldCategoryId !== finalCategoryId) {
+        const cacheKey = `documents:category:${user.id}:${oldCategoryId}`;
+        console.log(`🗑️  Invalidating old category cache: ${cacheKey}`);
+        cacheInvalidations.push(
+          invalidateCachePattern(cacheKey),
+          (async () => {
+            try {
+              await redisClient.del(cacheKey);
+              console.log(`✅ Directly deleted old cache key: ${cacheKey}`);
+            } catch (error) {
+              console.error(`Error directly deleting old cache key ${cacheKey}:`, error);
+            }
+          })()
+        );
+      }
+    }
 
     // Invalidate old and new category caches if category changed
     if (categoryId !== undefined && categoryId !== oldCategoryId) {
@@ -1250,6 +1302,7 @@ export const updateDocument = async (c: Context) => {
     }
 
     await Promise.all(cacheInvalidations);
+    console.log(`✅ Cache invalidation complete for document ${id}`);
 
     // If document was moved out of "Uncategorized", check if we should auto-delete it
     if (categoryId !== undefined && categoryId !== oldCategoryId && oldCategoryId) {
