@@ -40,7 +40,7 @@ export const avatar = async (c: Context) => {
       facial: userAvatar.facial,
       clothing: userAvatar.clothing,
       shoes: userAvatar.shoes,
-      accessories: userAvatar.accessories ? JSON.parse(userAvatar.accessories) : [],
+      accessories: userAvatar.accessories,
       unlockedItems: JSON.parse(userAvatar.unlockedItems || "[]")
     }
   }, 200);
@@ -64,7 +64,7 @@ export const updateAvatar = async (c: Context) => {
         facial: body.facial || null,
         clothing: body.clothing || null,
         shoes: body.shoes || null,
-        accessories: body.accessories ? JSON.stringify(body.accessories) : null,
+        accessories: body.accessories || null,
       },
       create: {
         userId: user.id,
@@ -78,7 +78,7 @@ export const updateAvatar = async (c: Context) => {
         facial: body.facial || null,
         clothing: body.clothing || null,
         shoes: body.shoes || null,
-        accessories: body.accessories ? JSON.stringify(body.accessories) : null,
+        accessories: body.accessories || null,
         unlockedItems: "[]"
       }
     });
@@ -96,7 +96,7 @@ export const updateAvatar = async (c: Context) => {
         facial: updatedAvatar.facial,
         clothing: updatedAvatar.clothing,
         shoes: updatedAvatar.shoes,
-        accessories: updatedAvatar.accessories ? JSON.parse(updatedAvatar.accessories) : [],
+        accessories: updatedAvatar.accessories,
         unlockedItems: JSON.parse(updatedAvatar.unlockedItems || "[]")
       }
     }, 200);
