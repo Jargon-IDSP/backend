@@ -52,7 +52,6 @@ export const getFriendsLeaderboard = async (c: Context) => {
     const user = c.get('user');
     const userId = user.id;
 
-    // Get users I'm following
     const myFollowing = await prisma.follow.findMany({
       where: {
         followerId: userId,

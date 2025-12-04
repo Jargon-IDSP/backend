@@ -2,10 +2,7 @@ import type { Context } from "hono";
 import { prisma } from "../lib/prisma";
 import { createNotification } from "../services/notificationService";
 
-/**
- * Follow a user
- * Creates a one-way follow relationship
- */
+
 export const followUser = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -28,7 +25,6 @@ export const followUser = async (c: Context) => {
       return c.json({ success: false, error: "User not found" }, 404);
     }
 
-    // Check if already following
     const existingFollow = await prisma.follow.findUnique({
       where: {
         followerId_followingId: {
@@ -45,7 +41,6 @@ export const followUser = async (c: Context) => {
       return c.json({ success: false, error: "Already following this user" }, 400);
     }
 
-    // Check if the other user blocked you
     const blockedByThem = await prisma.follow.findFirst({
       where: {
         followerId: followingId,
@@ -66,10 +61,9 @@ export const followUser = async (c: Context) => {
       },
     });
 
-    // Create notification for the user being followed
     try {
       await createNotification({
-        userId: followingId, // Notify the person being followed
+        userId: followingId, 
         type: "FRIEND_REQUEST",
         title: "New Friend Request",
         message: `${user.firstName || user.username || "Someone"} followed you!`,
@@ -78,7 +72,6 @@ export const followUser = async (c: Context) => {
       });
     } catch (notifError) {
       console.error("Failed to create follow notification:", notifError);
-      // Don't fail the whole process if notification fails
     }
 
     return c.json({ success: true, data: follow });
@@ -88,10 +81,7 @@ export const followUser = async (c: Context) => {
   }
 };
 
-/**
- * Unfollow a user
- * Removes the follow relationship
- */
+
 export const unfollowUser = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -121,10 +111,7 @@ export const unfollowUser = async (c: Context) => {
   }
 };
 
-/**
- * Block a user
- * Creates or updates follow relationship to BLOCKED status
- */
+
 export const blockUser = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -139,7 +126,6 @@ export const blockUser = async (c: Context) => {
       return c.json({ success: false, error: "Cannot block yourself" }, 400);
     }
 
-    // Create or update the block relationship
     const block = await prisma.follow.upsert({
       where: {
         followerId_followingId: {
@@ -164,10 +150,7 @@ export const blockUser = async (c: Context) => {
   }
 };
 
-/**
- * Unblock a user
- * Removes the block relationship
- */
+
 export const unblockUser = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -201,9 +184,7 @@ export const unblockUser = async (c: Context) => {
   }
 };
 
-/**
- * Get users you are following
- */
+
 export const getFollowing = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -262,9 +243,7 @@ export const getFollowing = async (c: Context) => {
   }
 };
 
-/**
- * Get your followers
- */
+
 export const getFollowers = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -323,9 +302,7 @@ export const getFollowers = async (c: Context) => {
   }
 };
 
-/**
- * Get follower count for a specific user
- */
+
 export const getFollowerCount = async (c: Context) => {
   try {
     const userId = c.req.param("userId");
@@ -348,9 +325,7 @@ export const getFollowerCount = async (c: Context) => {
   }
 };
 
-/**
- * Get following count for a specific user
- */
+
 export const getFollowingCount = async (c: Context) => {
   try {
     const userId = c.req.param("userId");
@@ -373,16 +348,12 @@ export const getFollowingCount = async (c: Context) => {
   }
 };
 
-/**
- * Get friends (mutual follows)
- * Returns users where both users are following each other
- */
+
 export const getFriends = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
 
-    // Get all users you're following
     const following = await prisma.follow.findMany({
       where: {
         followerId: userId,
@@ -424,7 +395,6 @@ export const getFriends = async (c: Context) => {
 
     const followingIds = following.map((f) => f.followingId);
 
-    // Get which of those users are also following you back (mutual)
     const mutualFollows = await prisma.follow.findMany({
       where: {
         followerId: { in: followingIds },
@@ -438,7 +408,6 @@ export const getFriends = async (c: Context) => {
 
     const mutualIds = new Set(mutualFollows.map((f) => f.followerId));
 
-    // Filter to only return mutual friends
     const friends = following
       .filter((f) => mutualIds.has(f.followingId))
       .map((f) => ({
@@ -453,9 +422,7 @@ export const getFriends = async (c: Context) => {
   }
 };
 
-/**
- * Get blocked users
- */
+
 export const getBlockedUsers = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -495,9 +462,6 @@ export const getBlockedUsers = async (c: Context) => {
   }
 };
 
-/**
- * Search users with follow status
- */
 export const searchUsers = async (c: Context) => {
   try {
     const user = c.get("user");
@@ -551,7 +515,6 @@ export const searchUsers = async (c: Context) => {
 
     const userIds = users.map((u) => u.id);
 
-    // Check which users you're following
     const youFollowing = await prisma.follow.findMany({
       where: {
         followerId: userId,
@@ -559,7 +522,6 @@ export const searchUsers = async (c: Context) => {
       },
     });
 
-    // Check which users are following you
     const followingYou = await prisma.follow.findMany({
       where: {
         followerId: { in: userIds },
@@ -612,16 +574,12 @@ export const searchUsers = async (c: Context) => {
   }
 };
 
-/**
- * Get friend suggestions (random users to follow)
- * Returns 3 random users that the current user is not following
- */
+
 export const getFriendSuggestions = async (c: Context) => {
   try {
     const user = c.get("user");
     const userId = user.id;
 
-    // Get all users the current user is following (including blocked)
     const following = await prisma.follow.findMany({
       where: {
         followerId: userId,
@@ -632,9 +590,8 @@ export const getFriendSuggestions = async (c: Context) => {
     });
 
     const followingIds = new Set(following.map((f) => f.followingId));
-    followingIds.add(userId); // Exclude self
+    followingIds.add(userId); 
 
-    // Get random users excluding self and users already following
     const allUsers = await prisma.user.findMany({
       where: {
         id: { notIn: Array.from(followingIds) },
@@ -663,14 +620,12 @@ export const getFriendSuggestions = async (c: Context) => {
           },
         },
       },
-      take: 100, // Get a larger pool to randomize from
+      take: 100, 
     });
 
-    // Shuffle and take 3
     const shuffled = allUsers.sort(() => 0.5 - Math.random());
     const suggestions = shuffled.slice(0, 3);
 
-    // Check which users are following you
     const suggestionIds = suggestions.map((u) => u.id);
     const followingYou = await prisma.follow.findMany({
       where: {
