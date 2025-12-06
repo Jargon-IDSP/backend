@@ -14,16 +14,13 @@ import {
   invalidateCachePattern,
 } from "../controllers/documentController";
 
-// Get actual queue instances
 const { ocrQueue, translationQueue, flashcardQueue } = getActualQueues();
 
 console.log("🔧 Initializing BullMQ workers...");
 
-// Get the shared Redis connection for all workers
 const workerConnection = queueConnection();
 console.log("✅ Worker connection object created");
 
-// OCR Worker
 export const ocrWorker = new Worker<OCRJobData>(
   "document-ocr",
   async (job: Job<OCRJobData>) => {
@@ -33,7 +30,6 @@ export const ocrWorker = new Worker<OCRJobData>(
     console.log(`🚀 Processing OCR job ${job.id} for document ${documentId}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    // Update job progress
     await job.updateProgress(10);
 
     try {
@@ -46,7 +42,6 @@ export const ocrWorker = new Worker<OCRJobData>(
 
       await job.updateProgress(90);
 
-      // Update document with extracted text (already done in extractTextWithOCR via performOCR)
       await invalidateCachePattern(`document:status:${documentId}`);
       await job.updateProgress(100);
 
@@ -54,7 +49,6 @@ export const ocrWorker = new Worker<OCRJobData>(
         `✅ OCR completed for document ${documentId} (${extractedText.length} chars)`
       );
 
-      // Preload user data once (saves DB query - both translation and flashcard need it)
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: { language: true },
@@ -62,12 +56,9 @@ export const ocrWorker = new Worker<OCRJobData>(
       const userLanguage = user?.language || 'english';
       console.log(`👤 User language preference: ${userLanguage}`);
 
-      // PARALLEL EXECUTION: Translation and flashcard generation can run simultaneously!
-      // Flashcard generation only needs extractedText, not translation
       const { flashcardQueue } = await import('../lib/queue');
 
       const [translationResult, flashcardQueueResult] = await Promise.allSettled([
-        // Start translation (runs in background)
         (async () => {
           try {
             console.log(`🌐 Starting translation for document ${documentId}`);
@@ -79,19 +70,17 @@ export const ocrWorker = new Worker<OCRJobData>(
               `⚠️ Translation failed for ${documentId}, but continuing:`,
               translationError
             );
-            // Don't throw - allow flashcard generation to continue
             return { success: false, error: translationError };
           }
         })(),
         
-        // Queue flashcard generation immediately (doesn't need translation!)
         flashcardQueue.add(
           `flashcards-${documentId}`,
           {
             documentId,
             userId,
             categoryId: job.data.categoryId || 6,
-            userLanguage, // Pass preloaded user language to flashcard worker
+            userLanguage, 
           },
           {
             ...jobOptions,
@@ -106,7 +95,6 @@ export const ocrWorker = new Worker<OCRJobData>(
         }),
       ]);
 
-      // Log results
       if (translationResult.status === 'rejected') {
         console.error(`❌ Translation promise rejected:`, translationResult.reason);
       }
@@ -122,16 +110,14 @@ export const ocrWorker = new Worker<OCRJobData>(
   },
   {
     connection: workerConnection,
-    concurrency: 2, // Process 2 OCR jobs concurrently
+    concurrency: 2, 
     limiter: {
-      max: 10, // Max 10 jobs
-      duration: 60000, // Per minute
+      max: 10, 
+      duration: 60000, 
     },
   }
 );
 
-// Translation Worker (not used anymore - translation happens in OCR worker)
-// Keeping this for backwards compatibility in case there are existing queued jobs
 export const translationWorker = new Worker<TranslationJobData>(
   "document-translation",
   async (job: Job<TranslationJobData>) => {
@@ -146,7 +132,6 @@ export const translationWorker = new Worker<TranslationJobData>(
     try {
       await job.updateProgress(20);
 
-      // This function already handles all the translation logic
       await translateDocument(documentId, userId, extractedText);
 
       await job.updateProgress(100);
@@ -161,11 +146,10 @@ export const translationWorker = new Worker<TranslationJobData>(
   },
   {
     connection: workerConnection,
-    concurrency: 3, // Process 3 translation jobs concurrently
+    concurrency: 3, 
   }
 );
 
-// Flashcard Worker - Generates both flashcards AND questions
 export const flashcardWorker = new Worker<FlashcardJobData>(
   "document-flashcards",
   async (job: Job<FlashcardJobData>) => {
@@ -180,7 +164,6 @@ export const flashcardWorker = new Worker<FlashcardJobData>(
     try {
       await job.updateProgress(10);
 
-      // Get document with extracted text (should already be available since OCR queues this job)
       const document = await prisma.document.findUnique({
         where: { id: documentId },
         select: { extractedText: true, filename: true },
@@ -197,7 +180,6 @@ export const flashcardWorker = new Worker<FlashcardJobData>(
         `✅ Starting flashcard generation for ${document.extractedText.length} chars of text...`
       );
 
-      // Generate flashcards and questions together (pass userLanguage to skip DB query)
       await generateFlashcardsAndQuestionsOptimized(
         documentId,
         userId,
@@ -207,7 +189,6 @@ export const flashcardWorker = new Worker<FlashcardJobData>(
 
       await job.updateProgress(90);
 
-      // Clear cache and mark as complete
       await invalidateCachePattern(`document:status:${documentId}`);
 
       await job.updateProgress(100);
@@ -227,7 +208,7 @@ export const flashcardWorker = new Worker<FlashcardJobData>(
   },
   {
     connection: workerConnection,
-    concurrency: 2, // Process 2 flashcard jobs concurrently
+    concurrency: 2, 
   }
 );
 
@@ -235,7 +216,6 @@ console.log("✅ OCR worker initialized");
 console.log("✅ Translation worker initialized");
 console.log("✅ Flashcard worker initialized");
 
-// Error handlers for OCR worker
 ocrWorker.on("completed", async (job) => {
   console.log(`✅ OCR job ${job.id} completed successfully`);
 });
@@ -247,7 +227,6 @@ ocrWorker.on("failed", async (job, err) => {
     const { documentId, userId, filename } = job.data;
     const attemptNumber = job.attemptsMade;
 
-    // Create error notification (final failure)
     try {
       await createNotification({
         userId,
@@ -258,10 +237,9 @@ ocrWorker.on("failed", async (job, err) => {
         documentId,
       });
 
-      // Mark document as failed
       await prisma.document.update({
         where: { id: documentId },
-        data: { ocrProcessed: true }, // Mark as processed to avoid stuck state
+        data: { ocrProcessed: true }, 
       });
     } catch (notifError) {
       console.error("Failed to create error notification:", notifError);
@@ -269,13 +247,11 @@ ocrWorker.on("failed", async (job, err) => {
   }
 });
 
-// First retry notification
 let ocrRetryNotified = new Set<string>();
 ocrWorker.on("error", async (err) => {
   console.error(`❌ OCR worker error:`, err);
 });
 
-// Listen for active jobs to detect retries
 ocrWorker.on("active", async (job) => {
   if (job.attemptsMade > 1 && !ocrRetryNotified.has(job.id!)) {
     ocrRetryNotified.add(job.id!);
@@ -300,7 +276,6 @@ ocrWorker.on("progress", (job, progress) => {
   console.log(`📊 OCR job ${job.id} progress: ${progress}%`);
 });
 
-// Error handlers for translation worker (kept for backwards compatibility)
 translationWorker.on("completed", (job) => {
   console.log(`✅ Translation job ${job.id} completed successfully`);
 });
@@ -337,20 +312,17 @@ translationWorker.on("progress", (job, progress) => {
   console.log(`📊 Translation job ${job.id} progress: ${progress}%`);
 });
 
-// Error handlers for flashcard worker
 flashcardWorker.on("completed", async (job) => {
   console.log(`✅ Flashcard job ${job.id} completed successfully`);
 
   const { documentId, userId } = job.data;
 
   try {
-    // Fetch document details for notification
     const document = await prisma.document.findUnique({
       where: { id: documentId },
       select: { filename: true },
     });
 
-    // Create success notification
     await createNotification({
       userId,
       type: "DOCUMENT_READY",
@@ -365,7 +337,6 @@ flashcardWorker.on("completed", async (job) => {
     console.log(`📬 Success notification created for document ${documentId}`);
   } catch (notifError) {
     console.error("Failed to create success notification:", notifError);
-    // Don't throw - notification failure shouldn't break the completion
   }
 });
 
@@ -396,7 +367,6 @@ flashcardWorker.on("failed", async (job, err) => {
         documentId,
       });
 
-      // Mark document as processed to avoid stuck state
       await prisma.document.update({
         where: { id: documentId },
         data: { ocrProcessed: true },
@@ -407,7 +377,6 @@ flashcardWorker.on("failed", async (job, err) => {
   }
 });
 
-// Retry notification for flashcard worker
 let flashcardRetryNotified = new Set<string>();
 flashcardWorker.on("active", async (job) => {
   if (job.attemptsMade > 1 && !flashcardRetryNotified.has(job.id!)) {
@@ -442,7 +411,6 @@ flashcardWorker.on("progress", (job, progress) => {
   console.log(`📊 Flashcard job ${job.id} progress: ${progress}%`);
 });
 
-// Graceful shutdown
 process.on("SIGTERM", async () => {
   console.log("🛑 SIGTERM received, closing workers...");
   await Promise.all([
