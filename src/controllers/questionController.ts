@@ -696,7 +696,7 @@ export const completeQuiz = async (c: Context) => {
       const percentCorrect = Math.round((score / totalQuestions) * 100);
 
       // Find the prebuilt quiz based on levelId, industryId, and quizNumber
-      const prebuiltQuiz = await prisma.prebuiltQuiz.findFirst({
+      let prebuiltQuiz = await prisma.prebuiltQuiz.findFirst({
         where: {
           levelId: parseInt(requestLevelId),
           quizNumber: quizNumber || 1,
@@ -704,24 +704,32 @@ export const completeQuiz = async (c: Context) => {
         },
       });
 
+      // If not found and industryId was provided, try with null (general quiz)
+      if (!prebuiltQuiz && industryId !== undefined && industryId !== null) {
+        prebuiltQuiz = await prisma.prebuiltQuiz.findFirst({
+          where: {
+            levelId: parseInt(requestLevelId),
+            quizNumber: quizNumber || 1,
+            industryId: null,
+          },
+        });
+      }
+
+      // If prebuilt quiz is not found, log a warning but still save the attempt
+      // This allows points to be saved even if the prebuilt quiz record doesn't exist
       if (!prebuiltQuiz) {
-        console.error("Prebuilt quiz not found for:", {
+        console.warn("Prebuilt quiz not found for:", {
           levelId: requestLevelId,
           quizNumber,
           industryId,
-        });
-        return errorResponse(
-          c,
-          "Prebuilt quiz not found",
-          404
-        );
+        }, "- Creating attempt without prebuiltQuizId");
       }
 
       const quizAttempt = await prisma.userQuizAttempt.create({
         data: {
           id: quizId,
           userId,
-          prebuiltQuizId: prebuiltQuiz.id,
+          prebuiltQuizId: prebuiltQuiz?.id || null,
           levelId: parseInt(requestLevelId),
           questionsAnswered: totalQuestions,
           questionsCorrect: score,
@@ -735,7 +743,7 @@ export const completeQuiz = async (c: Context) => {
         },
       });
 
-      console.log("Created quiz attempt for prebuilt quiz:", quizAttempt);
+      console.log("Created quiz attempt:", quizAttempt.id, prebuiltQuiz ? "with prebuilt quiz" : "without prebuilt quiz");
 
       await prisma.user.update({
         where: { id: userId },
